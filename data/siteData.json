@@ -1,0 +1,101 @@
+{
+  "brand": {
+    "name": "Soul Craft Studio",
+    "shortName": "SCS",
+    "tagline": "Handcrafted with love, knitted with passion. Discover our exclusive collection of wool art, decorations, and unique keychains that tell a story.",
+    "email": "Khushipatelpatel112@gmail.com",
+    "phone": "+91 90238 96348",
+    "location": "Valsad, Gujarat",
+    "instagram": "https://www.instagram.com/craftyyy111"
+  },
+  "categories": [
+    {
+      "name": "Woolen Fashion",
+      "img": "/images/cat_fashion.png",
+      "count": "150+ Items",
+      "color": "bg-orange-50"
+    },
+    {
+      "name": "Creative Keychains",
+      "img": "/images/cat_accessories.png",
+      "count": "80+ Items",
+      "color": "bg-blue-50"
+    },
+    {
+      "name": "Handmade Decor",
+      "img": "/images/cat_decor.png",
+      "count": "45+ Items",
+      "color": "bg-slate-50"
+    }
+  ],
+  "products": [
+    {
+      "name": "Soulful Tote",
+      "price": "₹1499",
+      "img": "/images/1.jpeg",
+      "tag": "Handmade"
+    },
+    {
+      "name": "Knitted Charm",
+      "price": "₹899",
+      "img": "/images/2.jpeg",
+      "tag": "New"
+    },
+    {
+      "name": "Woolen Heart",
+      "price": "₹599",
+      "img": "/images/3.jpeg",
+      "tag": "Bestseller"
+    },
+    {
+      "name": "Crafty Pouch",
+      "price": "₹1299",
+      "img": "/images/4.jpeg",
+      "tag": "Limited"
+    },
+    {
+      "name": "Soft Mascot",
+      "price": "₹799",
+      "img": "/images/5.jpeg",
+      "tag": "Popular"
+    },
+    {
+      "name": "Artist Scarf",
+      "price": "₹1999",
+      "img": "/images/6.jpeg",
+      "tag": "Premium"
+    },
+    {
+      "name": "Cozy Mittens",
+      "price": "₹699",
+      "img": "/images/7.jpeg",
+      "tag": "New"
+    },
+    {
+      "name": "Cloud Plush",
+      "price": "₹2499",
+      "img": "/images/8.jpeg",
+      "tag": "Exclusive"
+    }
+  ],
+  "founder": {
+    "name": "Khusi Patel",
+    "role": "Founder & Artist",
+    "image": "/images/founder.jpeg",
+    "quote": "Every loop of wool is a piece of my soul. I started this studio to bring warmth and happiness into people's homes through the art of knitting."
+  },
+  "faqs": [
+    {
+      "q": "What materials do you use?",
+      "a": "We use 100% premium, sustainably sourced wool and eco-friendly dyes for all our handcrafted items."
+    },
+    {
+      "q": "Do you take custom orders?",
+      "a": "Yes! We love creating unique pieces. Contact us with your ideas, and we'll bring them to life."
+    },
+    {
+      "q": "How long does shipping take?",
+      "a": "Since every item is handmade with love, it usually takes 5-7 business days to craft and ship your order."
+    }
+  ]
+}
