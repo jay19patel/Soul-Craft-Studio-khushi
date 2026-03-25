@@ -9,13 +9,18 @@ const Footer = () => {
             <div className="max-w-6xl mx-auto px-4 flex flex-col md:flex-row items-start justify-between gap-12">
                 {/* Brand Section */}
                 <div className="flex flex-col gap-6 max-w-xs">
-                    <div className="flex items-center gap-2">
-                        <div className="w-16 h-8 rounded-lg bg-orange-500 flex items-center justify-center text-white font-[family-name:var(--font-climate-crisis)] text-sm">
-                            {brand.shortName}
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl overflow-hidden shadow-sm shadow-orange-100">
+                            <img src="/logo.png" alt="SCS Logo" className="w-full h-full object-cover scale-110" />
                         </div>
-                        <span className="font-[family-name:var(--font-climate-crisis)] uppercase text-sm text-blue-950">
-                            {brand.name}
-                        </span>
+                        <div className="flex flex-col">
+                            <span className="font-[family-name:var(--font-climate-crisis)] uppercase text-xs text-blue-950 tracking-wider">
+                                Soul Craft
+                            </span>
+                            <span className="text-[8px] font-black uppercase tracking-[0.2em] text-orange-500">
+                                Studio
+                            </span>
+                        </div>
                     </div>
                     <p className="text-slate-400 font-medium text-sm leading-relaxed">
                         {brand.tagline.split('.')[0]}. Bringing warmth to your soul.

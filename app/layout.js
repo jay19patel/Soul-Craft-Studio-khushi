@@ -1,5 +1,6 @@
 import { Geist, Climate_Crisis } from "next/font/google";
 import "./globals.css";
+import { CartProvider } from "../context/CartContext";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,6 +15,9 @@ const climateCrisis = Climate_Crisis({
 export const metadata = {
   title: "Soul Craft Studio | Handcrafted Wool Art",
   description: "Discover our exclusive collection of handcrafted wool art, decorations, and unique keychains that tell a story.",
+  icons: {
+    icon: '/favicon.ico',
+  },
 };
 
 export default function RootLayout({ children }) {
@@ -22,7 +26,11 @@ export default function RootLayout({ children }) {
       lang="en"
       className={`${geistSans.variable} ${climateCrisis.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <CartProvider>
+          {children}
+        </CartProvider>
+      </body>
     </html>
   );
 }

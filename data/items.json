@@ -1,0 +1,134 @@
+{
+  "categories": [
+    {
+      "id": "woolen-fashion",
+      "name": "Woolen Fashion",
+      "description": "Stay cozy and stylish with our handcrafted woolen apparel.",
+      "image": "/images/cat_fashion.png"
+    },
+    {
+      "id": "creative-keychains",
+      "name": "Creative Keychains",
+      "description": "Unique and adorable keychains to personalize your style.",
+      "image": "/images/cat_accessories.png"
+    },
+    {
+      "id": "handmade-decor",
+      "name": "Handmade Decor",
+      "description": "Bring warmth to your home with our knitted decorations.",
+      "image": "/images/cat_decor.png"
+    }
+  ],
+  "products": [
+    {
+      "id": 1,
+      "name": "Soulful Tote",
+      "price": 1499,
+      "category": "woolen-fashion",
+      "image": "/images/1.jpeg",
+      "images": ["/images/1.jpeg", "/images/4.jpeg", "/images/6.jpeg"],
+      "tag": "Handmade",
+      "description": "A spacious and stylish tote bag, handcrafted with premium wool. This tote is perfect for daily use, combining durability with an artistic handcrafted aesthetic.",
+      "details": "100% Cotton Wool, Hand-knitted, Durable inner lining, Size: 14x16 inches."
+    },
+    {
+      "id": 2,
+      "name": "Knitted Charm",
+      "price": 899,
+      "category": "creative-keychains",
+      "image": "/images/2.jpeg",
+      "images": ["/images/2.jpeg", "/images/5.jpeg", "/images/8.jpeg"],
+      "tag": "New",
+      "description": "A cute knitted charm to add character to your keys or bag. Each charm is uniquely crafted with attention to every small detail.",
+      "details": "Premium Yarn, Stainless steel ring, Eco-friendly filling."
+    },
+    {
+      "id": 3,
+      "name": "Woolen Heart",
+      "price": 599,
+      "category": "handmade-decor",
+      "image": "/images/3.jpeg",
+      "images": ["/images/3.jpeg", "/images/1.jpeg", "/images/7.jpeg"],
+      "tag": "Bestseller",
+      "description": "A soft, knitted heart perfect for home decoration or gifting. It brings a touch of warmth and love to any corner of your room.",
+      "details": "Soft Wool, Washable, Safe for kids, Size: 5x5 inches."
+    },
+    {
+      "id": 4,
+      "name": "Crafty Pouch",
+      "price": 1299,
+      "category": "woolen-fashion",
+      "image": "/images/4.jpeg",
+      "images": ["/images/4.jpeg", "/images/2.jpeg", "/images/5.jpeg"],
+      "tag": "Limited",
+      "description": "A versatile pouch for your essentials, featuring intricate patterns. Ideal for carrying makeup, stationery, or your phone.",
+      "details": "Zip closure, Hand-knitted pattern, Lightweight, Dimensions: 8x5 inches."
+    },
+    {
+      "id": 5,
+      "name": "Soft Mascot",
+      "price": 799,
+      "category": "creative-keychains",
+      "image": "/images/5.jpeg",
+      "images": ["/images/5.jpeg", "/images/2.jpeg", "/images/8.jpeg"],
+      "tag": "Popular",
+      "description": "A tiny knitted mascot that brings a smile wherever it goes. It's the perfect companion for your backpack or a sweet desk buddy.",
+      "details": "Handcrafted, Hypoallergenic stuffing, Vibrant colors."
+    },
+    {
+      "id": 6,
+      "name": "Artist Scarf",
+      "price": 1999,
+      "category": "woolen-fashion",
+      "image": "/images/6.jpeg",
+      "images": ["/images/6.jpeg", "/images/1.jpeg", "/images/7.jpeg"],
+      "tag": "Premium",
+      "description": "An elegant, hand-knitted scarf designed for comfort and style. The artist's touch is visible in the unique loop patterns.",
+      "details": "Merino Wool Blend, Winter-ready, Extra long (6 feet), Hand wash only."
+    },
+    {
+      "id": 7,
+      "name": "Cozy Mittens",
+      "price": 699,
+      "category": "woolen-fashion",
+      "image": "/images/7.jpeg",
+      "images": ["/images/7.jpeg", "/images/3.jpeg", "/images/6.jpeg"],
+      "tag": "New",
+      "description": "Warm and soft mittens to keep your hands cozy during winter. Features a stretchable wrist band for a snug fit.",
+      "details": "Double layered wool, Breathable material, Available in multiple colors."
+    },
+    {
+      "id": 8,
+      "name": "Cloud Plush",
+      "price": 2499,
+      "category": "handmade-decor",
+      "image": "/images/8.jpeg",
+      "images": ["/images/8.jpeg", "/images/5.jpeg", "/images/3.jpeg"],
+      "tag": "Exclusive",
+      "description": "A large, fluffy cloud plushie that adds a touch of magic to any room. It feels like hugging a real cloud!",
+      "details": "Super soft synthetic wool, Large size (18 inches), Dust resistant."
+    },
+    {
+      "id": 9,
+      "name": "Boho Wall Hanging",
+      "price": 1799,
+      "category": "handmade-decor",
+      "image": "/images/3.jpeg",
+      "images": ["/images/3.jpeg", "/images/1.jpeg", "/images/8.jpeg"],
+      "tag": "Featured",
+      "description": "Incredibly detailed wall hanging for a bohemian interior vibe. Handcrafted with multiple yarn textures.",
+      "details": "Macramé & Knit hybrid, Natural wood rod, Length: 24 inches."
+    },
+    {
+      "id": 10,
+      "name": "Mini Cactus Pot",
+      "price": 499,
+      "category": "handmade-decor",
+      "image": "/images/2.jpeg",
+      "images": ["/images/2.jpeg", "/images/5.jpeg", "/images/3.jpeg"],
+      "tag": "Cute",
+      "description": "A knitted mini cactus that never needs watering! Comes in a cute little ceramic-look knitted pot.",
+      "details": "Miniature size (4 inches), Perfect for desk, Includes knitted soil detail."
+    }
+  ]
+}

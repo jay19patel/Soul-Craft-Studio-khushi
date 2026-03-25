@@ -1,5 +1,6 @@
 import React from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import siteData from '../data/siteData.json';
 
 const Products = () => {
@@ -40,12 +41,12 @@ const Products = () => {
             </div>
 
             <div className="flex justify-center mt-8">
-                <button className="px-10 py-4 bg-blue-600 text-white font-black uppercase tracking-widest text-sm rounded-full hover:bg-blue-700 transition-all shadow-xl shadow-blue-100 hover:shadow-blue-200 active:scale-95 group flex items-center gap-3">
+                <Link href="/shop" className="px-10 py-4 bg-blue-600 text-white font-black uppercase tracking-widest text-sm rounded-full hover:bg-blue-700 transition-all shadow-xl shadow-blue-100 hover:shadow-blue-200 active:scale-95 group flex items-center gap-3">
                     Explore All Products
                     <svg className="w-5 h-5 group-hover:translate-x-1.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3"></path>
                     </svg>
-                </button>
+                </Link>
             </div>
         </section>
     );

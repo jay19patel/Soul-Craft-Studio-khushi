@@ -21,10 +21,7 @@ const Founder = () => {
                         {/* Artistic overlay */}
                         <div className="absolute inset-0 bg-gradient-to-t from-orange-500/20 to-transparent"></div>
                     </div>
-                    {/* Decorative element */}
-                    <div className="absolute -bottom-6 -right-6 w-32 h-32 bg-blue-600 rounded-full flex items-center justify-center text-white font-[family-name:var(--font-climate-crisis)] text-4xl shadow-xl transform group-hover:rotate-12 transition-transform duration-500">
-                        {brand.shortName}
-                    </div>
+
                 </div>
 
                 {/* Right Side: Founder Info */}
