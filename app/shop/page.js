@@ -117,7 +117,7 @@ const ShopPage = () => {
                   </div>
 
                   <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">
-                    {categories.find(c => c.id === product.category)?.name.split(' ')[0]}
+                    {categories.find(c => c.id === product.category)?.name?.split(' ')[0]}
                   </span>
                 </div>
               </div>

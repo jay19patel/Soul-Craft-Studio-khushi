@@ -88,12 +88,19 @@ const OrderDetailsPage = () => {
                 <h1 className="text-3xl md:text-5xl font-[family-name:var(--font-climate-crisis)] uppercase text-blue-950">
                   Order Details.
                 </h1>
-                <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">
-                  ID: <span className="text-blue-600">{order.id}</span> • Placed on {order.date}
+                <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">
+                  Order ID: <span className="text-blue-600">#{order.id}</span> • {order.date}
                 </p>
               </div>
-              <div className="px-4 py-2 bg-blue-600 text-white rounded-full font-black uppercase tracking-widest text-[10px]">
-                Status: {order.status}
+              <div className="flex flex-col items-end gap-2">
+                <div className="px-4 py-2 bg-blue-600 text-white rounded-full font-black uppercase tracking-widest text-[10px]">
+                  Order Status: {order.status}
+                </div>
+                {order.paymentStatus && (
+                  <div className="px-3 py-1 bg-orange-50 text-orange-500 border border-orange-100 rounded-full font-black uppercase tracking-widest text-[9px]">
+                    Payment: {order.paymentStatus}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -113,15 +120,17 @@ const OrderDetailsPage = () => {
                 { label: 'Shipped', icon: Truck },
                 { label: 'Delivered', icon: CheckCircle }
               ].map((step, idx) => {
-                const isCompleted = getStatusStep(order.status) >= idx;
+                const stepIdx = getStatusStep(order.status);
+                const isCompleted = stepIdx >= idx;
+                const isActive = stepIdx === idx;
                 const Icon = step.icon;
                 return (
                   <div key={idx} className="relative z-10 flex flex-col items-center gap-3 bg-white px-2">
                     <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border-2 transition-all duration-500 ${
                       isCompleted 
-                      ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-100 scale-110' 
+                      ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-100' 
                       : 'bg-white border-slate-100 text-slate-300'
-                    }`}>
+                    } ${isActive ? 'scale-110' : ''}`}>
                       <Icon className="w-5 h-5" />
                     </div>
                     <span className={`text-[10px] font-black uppercase tracking-widest text-center ${
@@ -139,8 +148,9 @@ const OrderDetailsPage = () => {
             {/* Left Column: Items */}
             <div className="lg:col-span-2 flex flex-col gap-6">
               <div className="bg-white rounded-[32px] overflow-hidden border border-slate-100 shadow-sm">
-                <div className="p-6 md:p-8 bg-slate-50/50 border-b border-slate-100">
+                <div className="p-6 md:p-8 bg-slate-50/50 border-b border-slate-100 flex justify-between items-center">
                   <h3 className="text-sm font-black uppercase tracking-widest text-blue-950">Ordered Items</h3>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{order.items.length} Items</span>
                 </div>
                 <div className="p-6 md:p-8 flex flex-col gap-6">
                   {order.items.map((item, idx) => (
@@ -170,7 +180,7 @@ const OrderDetailsPage = () => {
                       <span>Shipping</span>
                       <span>FREE</span>
                     </div>
-                    <div className="flex justify-between text-lg font-black text-blue-950 uppercase pt-2 border-t border-slate-50">
+                    <div className="flex justify-between text-xl font-black text-blue-950 uppercase pt-4 mt-2 border-t border-slate-50">
                       <span>Total Amount</span>
                       <span>₹{order.total}</span>
                     </div>
@@ -187,31 +197,42 @@ const OrderDetailsPage = () => {
                   <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
                     <MapPin className="w-5 h-5" />
                   </div>
-                  <h3 className="text-[10px] font-black uppercase tracking-widest text-blue-950">Shipping Address</h3>
+                  <h3 className="text-[10px] font-black uppercase tracking-widest text-blue-950">Shipping To</h3>
                 </div>
-                <div className="flex flex-col gap-2">
-                  <p className="text-sm font-black text-blue-950">{order.shipping.fullName}</p>
-                  <p className="text-xs font-semibold text-slate-500 leading-relaxed whitespace-pre-wrap">
+                <div className="flex flex-col gap-3">
+                  <p className="text-sm font-black text-blue-950 uppercase">{order.shipping.fullName}</p>
+                  <p className="text-xs font-bold text-slate-500 leading-relaxed uppercase">
                     {order.shipping.address}<br />
-                    {order.shipping.city}, {order.shipping.state}<br />
-                    {order.shipping.pincode}
+                    {order.shipping.city}, {order.shipping.pincode}
                   </p>
-                  <p className="text-xs font-semibold text-slate-500 mt-2">{order.shipping.phone}</p>
-                  <p className="text-xs font-semibold text-slate-500">{order.shipping.email}</p>
+                  <div className="flex flex-col gap-1 pt-2">
+                    <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Contact</p>
+                    <p className="text-xs font-bold text-blue-600 lowercase">{order.shipping.email}</p>
+                  </div>
                 </div>
               </div>
 
-              {/* Payment Method */}
-              <div className="bg-white rounded-[32px] p-8 border border-slate-100 shadow-sm flex flex-col gap-6 h-fit">
+              {/* Payment Method - Updated for Online Payment */}
+              <div className="bg-white rounded-[32px] p-8 border border-slate-100 shadow-sm flex flex-col gap-6 h-fit relative overflow-hidden">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 bg-orange-50 text-orange-500 rounded-xl flex items-center justify-center">
                     <CreditCard className="w-5 h-5" />
                   </div>
-                  <h3 className="text-[10px] font-black uppercase tracking-widest text-blue-950">Payment Info</h3>
+                  <h3 className="text-[10px] font-black uppercase tracking-widest text-blue-950">Payment Detail</h3>
                 </div>
-                <div className="flex flex-col gap-1">
-                  <p className="text-xs font-black text-blue-950 uppercase tracking-widest">Cash on Delivery</p>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Pay upon delivery</p>
+                <div className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-1">
+                    <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Method</p>
+                    <p className="text-xs font-black text-blue-950 uppercase tracking-widest">Online (QR Code)</p>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Transaction ID</p>
+                    <p className="text-xs font-bold text-blue-600 truncate">{order.paymentId || 'Pending'}</p>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Verification Status</p>
+                    <p className="text-[10px] font-black text-orange-500 uppercase">{order.paymentStatus || 'Pending'}</p>
+                  </div>
                 </div>
               </div>
 
