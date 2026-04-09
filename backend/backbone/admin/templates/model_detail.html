@@ -1,0 +1,260 @@
+{% extends "base.html" %}
+
+{% block title %}{{ model_name }} Detail | Backbone Admin{% endblock %}
+{% block header %}{{ model_name }} Detail{% endblock %}
+
+{% block content %}
+<div class="mb-6 flex items-center justify-between">
+    <div class="flex items-center space-x-2 text-sm text-slate-400">
+        <a href="/admin" class="hover:text-indigo-600 transition-colors">Admin</a>
+        <i class="fas fa-chevron-right text-[10px]"></i>
+        <a href="/admin/{{ model_name }}" class="hover:text-indigo-600 transition-colors">{{ model_name }}</a>
+        <i class="fas fa-chevron-right text-[10px]"></i>
+        <span class="text-slate-600 font-medium">Record {{ item.id }}</span>
+    </div>
+    <a href="/admin/{{ model_name }}"
+        class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-semibold transition-all">
+        <i class="fas fa-arrow-left mr-2"></i> Back to List
+    </a>
+</div>
+
+<form action="/admin/{{ model_name }}/{{ item.id }}" method="POST"
+    class="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+    <div class="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+        <div>
+            <h2 class="text-2xl font-bold text-slate-800">Edit Record</h2>
+            <p class="text-slate-500 text-sm mt-1">Update values for this {{ model_name }} entry.</p>
+        </div>
+        <div class="flex items-center space-x-3">
+            <a href="/admin/{{ model_name }}/{{ item.id }}/delete"
+                onclick="return confirm('Are you sure you want to delete this record?')"
+                class="px-4 py-2 text-red-600 hover:bg-red-50 rounded-xl text-sm font-semibold transition-all">
+                <i class="fas fa-trash-alt mr-2"></i> Delete
+            </a>
+            <div class="h-12 w-12 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center">
+                <i class="fas fa-edit text-xl"></i>
+            </div>
+        </div>
+    </div>
+
+    <div class="p-8">
+        {% if model_name == 'Attachment' and item.file_path %}
+        <div class="mb-8 p-6 bg-slate-50 border border-slate-100 rounded-2xl flex flex-col items-center">
+            <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Attachment Preview</h3>
+
+            <div class="relative group cursor-pointer" onclick="window.open('{{ item.file_path }}', '_blank')">
+                <!-- Fallback to icon if not image, otherwise show image -->
+                {% if item.content_type and 'image' in item.content_type %}
+                <img src="{{ item.file_path }}" alt="Preview"
+                    class="w-64 h-64 object-cover rounded-xl shadow-md border border-slate-200 mb-4 group-hover:opacity-90 transition-opacity bg-white">
+                {% else %}
+                <div
+                    class="w-64 h-64 bg-white rounded-xl shadow-md border border-slate-200 mb-4 flex flex-col items-center justify-center text-slate-300 group-hover:bg-slate-50 transition-colors">
+                    <i class="fas fa-file-alt text-6xl mb-4 text-slate-200"></i>
+                    <span class="text-sm font-semibold text-slate-400">File Preview</span>
+                </div>
+                {% endif %}
+                <div
+                    class="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex justify-center items-center transition-opacity rounded-xl w-64 h-64 top-0 left-0">
+                    <i class="fas fa-search-plus text-white text-3xl"></i>
+                </div>
+            </div>
+
+            <div class="flex space-x-3 mt-2">
+                <a href="{{ item.file_path }}" download="{{ item.filename or 'download' }}" target="_blank"
+                    class="px-5 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-xl text-sm font-bold border border-indigo-200 transition-colors inline-block text-center shadow-sm">
+                    <i class="fas fa-download mr-1"></i> Download File
+                </a>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="grid grid-cols-1 gap-y-6">
+            {% for name, field in model_fields.items() %}
+            {% if name not in ['hashed_password', 'password'] and name not in internal_fields %}
+            <div class="border-b border-slate-50 pb-6 last:border-0 last:pb-0">
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">{{ name|nice_title
+                    }}</label>
+
+                {% set value = item[name] %}
+
+                {% if name in internal_fields %}
+                <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-slate-500 font-mono text-sm">
+                    {{ value }}
+                </div>
+                {% else %}
+                {% set f_type = field.annotation | string %}
+                {% set link_model = field_links.get(name) %}
+                {% if 'bool' in f_type %}
+                <select name="{{ name }}"
+                    class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all">
+                    <option value="true" {% if value %}selected{% endif %}>True</option>
+                    <option value="false" {% if not value %}selected{% endif %}>False</option>
+                </select>
+                {% elif 'int' in f_type or 'float' in f_type %}
+                <input type="number" name="{{ name }}" step="any" value="{{ value }}"
+                    class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all">
+                {% elif link_model and value is mapping and value.id %}
+                <div class="relative group inline-block w-full" id="single-link-{{ name }}">
+                    {% if link_model == 'Attachment' and value.file_path %}
+                    <a href="/admin/{{ link_model }}/{{ value.id }}"
+                        class="block w-64 overflow-hidden rounded-xl border border-slate-200 hover:border-indigo-400 transition-colors shadow-sm bg-white">
+                        <img src="{{ value.file_path }}" alt="Attachment"
+                            class="w-full h-40 object-cover border-b border-slate-100">
+                        <div
+                            class="p-3 bg-slate-50 text-xs flex justify-between items-center text-slate-600 truncate font-medium">
+                            <span>{{ value.filename or 'Attachment' }}</span>
+                            <i class="fas fa-external-link-alt text-slate-400"></i>
+                        </div>
+                    </a>
+                    {% else %}
+                    <a href="/admin/{{ link_model }}/{{ value.id }}"
+                        class="block p-4 bg-indigo-50/30 hover:bg-indigo-50 border border-indigo-100/50 rounded-xl transition-colors">
+                        <div class="flex items-center justify-between">
+                            <span class="text-sm font-medium text-indigo-700">
+                                {{ value.name or value.title or value.email or value.full_name or value.id }}
+                            </span>
+                            <span
+                                class="text-[10px] uppercase font-bold text-indigo-400 bg-white px-2 py-1 rounded-md border border-indigo-100 shadow-sm flex items-center shadow-sm">
+                                {{ link_model }} <i class="fas fa-arrow-right ml-1"></i>
+                            </span>
+                        </div>
+                    </a>
+                    {% endif %}
+                    <button type="button" onclick="document.getElementById('single-link-{{ name }}').style.display='none'; document.getElementById('remove-single-{{ name }}').disabled=false; document.getElementById('search-container-{{ name }}').style.display='block';" 
+                            class="absolute -top-2 -right-2 bg-slate-100 text-slate-400 rounded-full w-6 h-6 flex items-center justify-center shadow-md opacity-0 group-hover:opacity-100 hover:bg-red-500 hover:text-white transition-all z-10 cursor-pointer"
+                            title="Remove relation">
+                        <i class="fas fa-times text-xs"></i>
+                    </button>
+                    <!-- Submits empty string if they click remove, thus nullifying the field -->
+                    <input type="hidden" name="{{ name }}" value="" id="remove-single-{{ name }}" disabled>
+                </div>
+                <!-- Hidden search dropdown so they can pick a new relation after removing the current one -->
+                <div id="search-container-{{ name }}" class="relative search-container" style="display: none;">
+                    <input type="text" placeholder="Search to select {{ name|nice_title }}..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 pr-10 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all cursor-pointer" readonly onclick="this.removeAttribute('readonly')">
+                    <button type="button" class="clear-btn absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-red-500 z-10" style="display: none;" title="Clear selection">
+                        <i class="fas fa-times-circle text-lg"></i>
+                    </button>
+                    <input type="hidden" name="{{ name }}" id="search-input-{{ name }}" {% if value and value is mapping and value.id %}disabled{% endif %}>
+                    <div class="search-results-dropdown"><div class="results-list custom-scrollbar max-h-60 overflow-y-auto"></div><div class="p-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-slate-500"><button type="button" class="prev-btn px-3 py-1 bg-white border border-slate-200 rounded-lg disabled:opacity-50"><i class="fas fa-chevron-left"></i></button><span class="page-info">Page 1 of 1</span><button type="button" class="next-btn px-3 py-1 bg-white border border-slate-200 rounded-lg disabled:opacity-50"><i class="fas fa-chevron-right"></i></button></div></div>
+                </div>
+                <script>document.addEventListener('DOMContentLoaded', () => { window.initSearchableSelect('search-container-{{ name }}', '{{ link_model }}', '{{ name }}'); });</script>
+                {% elif link_model and value is iterable and value is not string and value|length > 0 and value[0] is mapping and value[0].id %}
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {% for rel_val in value %}
+                    <div class="relative group inline-block w-full" id="multi-link-{{ name }}-{{ loop.index }}">
+                        <a href="/admin/{{ link_model }}/{{ rel_val.id }}"
+                            class="block p-3 bg-indigo-50/30 hover:bg-indigo-50 border border-indigo-100/50 rounded-xl transition-colors flex items-center justify-between">
+                            <span class="text-sm font-medium text-indigo-700 truncate mr-2">
+                                {{ rel_val.name or rel_val.title or rel_val.email or rel_val.full_name or rel_val.id }}
+                            </span>
+                            <i class="fas fa-external-link-alt text-indigo-400 text-xs flex-shrink-0"></i>
+                        </a>
+                        <button type="button" onclick="document.getElementById('multi-link-{{ name }}-{{ loop.index }}').style.display='none'; document.getElementById('keep-multi-{{ name }}-{{ loop.index }}').disabled=true;" 
+                            class="absolute -top-2 -right-2 bg-slate-100 text-slate-400 rounded-full w-6 h-6 flex items-center justify-center shadow-md opacity-0 group-hover:opacity-100 hover:bg-red-500 hover:text-white transition-all z-10 cursor-pointer"
+                            title="Remove relation">
+                            <i class="fas fa-times text-xs"></i>
+                        </button>
+                        <!-- Submit the existing IDs. Disabling it means this ID gets removed from the submitted array -->
+                        <input type="hidden" name="{{ name }}" value="{{ rel_val.id }}" id="keep-multi-{{ name }}-{{ loop.index }}">
+                    </div>
+                    {% endfor %}
+                    <!-- Always submit one empty fallback so if they remove all items, it clears the list entirely rather than ignoring the absent array -->
+                    <input type="hidden" name="{{ name }}" value="">
+                </div>
+                {% elif link_model %}
+                <div id="search-container-{{ name }}" class="relative search-container">
+                    <input type="text" placeholder="Search to select {{ name|nice_title }}..."
+                        class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 pr-10 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all cursor-pointer"
+                        readonly onclick="this.removeAttribute('readonly')">
+                    <button type="button" class="clear-btn absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-red-500 z-10" style="display: none;" title="Clear selection">
+                        <i class="fas fa-times-circle text-lg"></i>
+                    </button>
+                    <input type="hidden" name="{{ name }}">
+
+                    <div class="search-results-dropdown">
+                        <div class="results-list custom-scrollbar max-h-60 overflow-y-auto">
+                            <!-- Results will be injected here -->
+                        </div>
+                        <div class="p-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-slate-500">
+                            <button type="button" class="prev-btn px-3 py-1 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                                <i class="fas fa-chevron-left"></i>
+                            </button>
+                            <span class="page-info">Page 1 of 1</span>
+                            <button type="button" class="next-btn px-3 py-1 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                                <i class="fas fa-chevron-right"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <script>
+                    document.addEventListener('DOMContentLoaded', () => {
+                        window.initSearchableSelect('search-container-{{ name }}', '{{ link_model }}', '{{ name }}');
+                    });
+                </script>
+                {% elif value is mapping or (value is iterable and value is not string) or 'list' in f_type.lower() or
+                'dict' in f_type.lower() %}
+                <textarea name="{{ name }}" rows="4"
+                    class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-mono text-sm">{{ value | tojson(indent=2) if value is defined and value is not none else '' }}</textarea>
+                {% else %}
+                {% if name == 'size' and value %}
+                <div class="flex items-center gap-3">
+                    <span
+                        class="inline-flex items-center px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-700 text-sm font-bold font-mono">
+                        <i class="fas fa-hdd mr-2 text-indigo-400"></i>{{ value | filesize }}
+                    </span>
+                    <span class="text-xs text-slate-400 font-mono">({{ value }} bytes)</span>
+                </div>
+                {% else %}
+                <input type="text" name="{{ name }}" value="{{ value }}"
+                    class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all">
+                {% endif %}
+                {% endif %}
+                {% endif %}
+
+                {% set field_desc = field.description if field.description else 'Enter ' ~ (name|replace('_', ' ')) %}
+                <p class="text-xs text-slate-400 mt-2"><i class="fas fa-info-circle mr-1 opacity-70"></i>{{ field_desc
+                    }}</p>
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="p-8 bg-slate-50 border-t border-slate-100 flex justify-end">
+        <button type="submit"
+            class="px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold shadow-lg shadow-indigo-500/30 transition-all transform hover:-translate-y-0.5 active:translate-y-0">
+            Save Changes
+        </button>
+    </div>
+</form>
+
+{# ── Read-only Audit / Record Info panel ── #}
+<div class="mt-6 bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+    <div class="p-6 border-b border-slate-100 bg-slate-50/50">
+        <h2 class="text-sm font-bold text-slate-500 uppercase tracking-widest">
+            <i class="fas fa-info-circle mr-2 text-slate-400"></i>Record Info
+        </h2>
+    </div>
+    <div class="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {% for name in internal_fields %}
+        {% if item[name] is defined and item[name] is not none %}
+        <div class="bg-slate-50 rounded-xl p-4 border border-slate-100">
+            <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{{ name|nice_title }}</p>
+            <p class="text-sm text-slate-700 font-mono break-all">
+                {% if item[name] is sameas true %}
+                <span
+                    class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">Yes</span>
+                {% elif item[name] is sameas false %}
+                <span
+                    class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-500">No</span>
+                {% else %}
+                {{ item[name] }}
+                {% endif %}
+            </p>
+        </div>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
