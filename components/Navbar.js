@@ -16,9 +16,9 @@ const Navbar = () => {
     <>
       <header className="w-full px-6 py-4 flex items-center justify-between border-b border-orange-100 bg-white/80 backdrop-blur-md sticky top-0 z-50">
         <div className="flex items-center gap-2">
-          <Link href="/" className="flex items-center gap-3 group">
-            <div className="w-14 h-14 rounded-2xl overflow-hidden shadow-sm shadow-orange-100 group-hover:scale-110 transition-transform duration-300">
-              <img src="/logo.png" alt="SCS Logo" className="w-full h-full object-cover scale-110" />
+          <Link href="/" className="flex items-center gap-3">
+            <div className="w-14 h-14 bg-transparent">
+              <img src="/logo.png" alt="SCS Logo" className="w-full h-full object-contain mix-blend-multiply" />
             </div>
             <div className="flex flex-col -gap-1">
               <span className="font-[family-name:var(--font-climate-crisis)] uppercase text-xl text-blue-950 tracking-wider">
