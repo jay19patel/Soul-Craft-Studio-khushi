@@ -67,7 +67,17 @@ export const CartProvider = ({ children }) => {
         (sum, item) => sum + (item.priceValue ?? item.price ?? 0) * item.quantity,
         0
     );
-    updateCart(cartId, { items: cart, total_amount: totalAmount }).catch(console.error);
+    
+    // Normalise items for API precisely: use product_id and numeric priceValue
+    const payloadItems = cart.map(item => ({
+      product_id: item.id || item._id || item.product_id,
+      name: item.name,
+      quantity: item.quantity,
+      price: item.priceValue || (typeof item.price === 'string' ? parseFloat(item.price.replace(/[^\d.]/g, '')) : item.price),
+      image: item.image
+    }));
+
+    updateCart(cartId, { items: payloadItems, total_amount: totalAmount }).catch(console.error);
   }, [cart, isReady, cartId]);
 
   const addToCart = (product) => {
