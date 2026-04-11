@@ -1,6 +1,8 @@
 import { Geist, Climate_Crisis } from "next/font/google";
 import "./globals.css";
 import { CartProvider } from "../context/CartContext";
+import { GoogleOAuthProvider } from "@react-oauth/google";
+
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -20,6 +22,8 @@ export const metadata = {
   },
 };
 
+import { AuthProvider } from "../context/AuthContext";
+
 export default function RootLayout({ children }) {
   return (
     <html
@@ -27,10 +31,15 @@ export default function RootLayout({ children }) {
       className={`${geistSans.variable} ${climateCrisis.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <CartProvider>
-          {children}
-        </CartProvider>
+        <GoogleOAuthProvider clientId={process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "your_google_client_id_here.apps.googleusercontent.com"}>
+          <AuthProvider>
+            <CartProvider>
+              {children}
+            </CartProvider>
+          </AuthProvider>
+        </GoogleOAuthProvider>
       </body>
+
     </html>
   );
 }

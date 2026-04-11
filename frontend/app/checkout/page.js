@@ -5,14 +5,16 @@ import { useCart } from '../../context/CartContext';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import { useRouter } from 'next/navigation';
-import { ChevronLeft, MapPin, Truck, ShieldCheck, CreditCard } from 'lucide-react';
+import { ChevronLeft, MapPin, CreditCard, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
+import { createOrder } from '../../lib/api';
 
 const CheckoutPage = () => {
   const { cart, cartTotal, clearCart } = useCart();
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [step, setStep] = useState('shipping'); // 'shipping' or 'payment'
+  const [submitError, setSubmitError] = useState(null);
+  const [step, setStep] = useState('shipping'); // 'shipping' | 'payment'
 
   const [formData, setFormData] = useState({
     fullName: '',
@@ -21,22 +23,21 @@ const CheckoutPage = () => {
     address: '',
     city: '',
     pincode: '',
-    state: ''
+    state: '',
   });
 
   const [paymentData, setPaymentData] = useState({
     paymentId: '',
-    screenshot: null
   });
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
   const handlePaymentChange = (e) => {
     const { name, value } = e.target;
-    setPaymentData(prev => ({ ...prev, [name]: value }));
+    setPaymentData((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleProceedToPayment = (e) => {
@@ -45,35 +46,62 @@ const CheckoutPage = () => {
     window.scrollTo(0, 0);
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
-    
-    // Create order object
-    const newOrder = {
-      id: `SC-${Math.floor(Math.random() * 1000000)}`,
-      date: new Date().toLocaleString(),
-      items: cart,
-      total: cartTotal,
-      status: 'Confirmed',
-      paymentStatus: 'Pending Verification',
-      paymentId: paymentData.paymentId,
-      shipping: formData
-    };
+    setSubmitError(null);
 
-    // Save to localStorage
-    const existingOrders = JSON.parse(localStorage.getItem('soulcraft_orders') || '[]');
-    localStorage.setItem('soulcraft_orders', JSON.stringify([newOrder, ...existingOrders]));
-    
-    // Clear cart
-    clearCart();
-    
-    // Simulate order processing
-    setTimeout(() => {
-      router.push(`/order-success?id=${newOrder.id}`);
-    }, 1500);
+    try {
+      // Build order items from cart
+      const orderItems = cart.map((item) => ({
+        product_id: item.id,
+        name: item.name,
+        quantity: item.quantity,
+        price: item.priceValue ?? item.price ?? 0,
+        image: item.image || item.img || null,
+      }));
+
+      // Full shipping address string
+      const shippingAddress = [
+        formData.address,
+        formData.city,
+        formData.state,
+        formData.pincode,
+      ]
+        .filter(Boolean)
+        .join(', ');
+
+      const payload = {
+        customer_name: formData.fullName,
+        customer_email: formData.email,
+        customer_phone: formData.phone || null,
+        shipping_address: shippingAddress,
+        city: formData.city,
+        state: formData.state,
+        pincode: formData.pincode,
+        items: orderItems,
+        total_amount: cartTotal,
+        payment_id: paymentData.paymentId || null,
+        payment_status: paymentData.paymentId ? 'pending_verification' : 'pending_verification',
+        notes: null,
+        status: 'pending',
+      };
+
+      const createdOrder = await createOrder(payload);
+
+      // Clear cart
+      clearCart();
+
+      // Redirect to success page with real order ID
+      const orderId = createdOrder.id || createdOrder._id;
+      router.push(`/order-success?id=${orderId}`);
+    } catch (err) {
+      setSubmitError(err.message || 'Something went wrong. Please try again.');
+      setIsSubmitting(false);
+    }
   };
 
+  // Empty cart guard
   if (cart.length === 0) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -82,9 +110,16 @@ const CheckoutPage = () => {
           <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center shadow-sm">
             <ChevronLeft className="w-10 h-10 text-slate-300" />
           </div>
-          <h1 className="text-3xl font-[family-name:var(--font-climate-crisis)] uppercase text-blue-950">Your cart is empty</h1>
-          <p className="text-slate-500 max-w-sm">Please add some handcrafted items to your cart before checking out.</p>
-          <Link href="/shop" className="bg-blue-600 text-white px-8 py-3 rounded-full font-black uppercase tracking-widest text-sm shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all">
+          <h1 className="text-3xl font-[family-name:var(--font-climate-crisis)] uppercase text-blue-950">
+            Your cart is empty
+          </h1>
+          <p className="text-slate-500 max-w-sm">
+            Please add some handcrafted items to your cart before checking out.
+          </p>
+          <Link
+            href="/shop"
+            className="bg-blue-600 text-white px-8 py-3 rounded-full font-black uppercase tracking-widest text-sm shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all"
+          >
             Browse Shop
           </Link>
         </main>
@@ -99,7 +134,7 @@ const CheckoutPage = () => {
 
       <main className="flex-grow w-full max-w-7xl mx-auto px-4 py-12 md:py-20">
         <div className="flex flex-col gap-8">
-          <button 
+          <button
             onClick={() => step === 'payment' ? setStep('shipping') : router.push('/shop')}
             className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-400 hover:text-orange-500 w-fit transition-colors"
           >
@@ -111,24 +146,43 @@ const CheckoutPage = () => {
             {step === 'shipping' ? 'Checkout.' : 'Payment.'}
           </h1>
 
+          {/* Step indicator */}
+          <div className="flex items-center gap-3">
+            <div className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest ${step === 'shipping' ? 'text-blue-600' : 'text-green-500'}`}>
+              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-black ${step === 'shipping' ? 'bg-blue-600' : 'bg-green-500'}`}>
+                {step === 'shipping' ? '1' : '✓'}
+              </div>
+              Shipping
+            </div>
+            <div className="w-8 h-px bg-slate-200" />
+            <div className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest ${step === 'payment' ? 'text-blue-600' : 'text-slate-300'}`}>
+              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-black ${step === 'payment' ? 'bg-blue-600' : 'bg-slate-200'}`}>
+                2
+              </div>
+              Payment
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-start mt-4">
             {/* Form Column */}
             <div className="lg:col-span-8 flex flex-col gap-8">
+              {/* ── Shipping Step ── */}
               {step === 'shipping' ? (
                 <form onSubmit={handleProceedToPayment} className="flex flex-col gap-8">
-                  {/* Shipping Section */}
                   <div className="bg-white rounded-[32px] p-8 md:p-10 border border-slate-100 shadow-sm flex flex-col gap-8">
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 bg-orange-100 text-orange-600 rounded-2xl flex items-center justify-center">
                         <MapPin className="w-6 h-6" />
                       </div>
-                      <h2 className="text-xl font-black uppercase tracking-tight text-blue-950">Shipping Details</h2>
+                      <h2 className="text-xl font-black uppercase tracking-tight text-blue-950">
+                        Shipping Details
+                      </h2>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="flex flex-col gap-2">
                         <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">Full Name</label>
-                        <input 
+                        <input
                           required
                           name="fullName"
                           value={formData.fullName}
@@ -138,8 +192,8 @@ const CheckoutPage = () => {
                         />
                       </div>
                       <div className="flex flex-col gap-2">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">Email Address</label>
-                        <input 
+                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">Email Address</label>
+                        <input
                           required
                           type="email"
                           name="email"
@@ -149,21 +203,22 @@ const CheckoutPage = () => {
                           className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                         />
                       </div>
-                      <div className="flex flex-col gap-2 md:col-span-2">
-                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">Complete Address</label>
-                        <textarea 
-                          required
-                          name="address"
-                          value={formData.address}
+                      <div className="flex flex-col gap-2">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">
+                          Phone Number <span className="text-slate-300">(optional)</span>
+                        </label>
+                        <input
+                          type="tel"
+                          name="phone"
+                          value={formData.phone}
                           onChange={handleInputChange}
-                          placeholder="Street, Landmark, Apartment NO."
-                          rows={3}
-                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none"
+                          placeholder="+91 98765 43210"
+                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                         />
                       </div>
                       <div className="flex flex-col gap-2">
                         <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">City</label>
-                        <input 
+                        <input
                           required
                           name="city"
                           value={formData.city}
@@ -172,9 +227,32 @@ const CheckoutPage = () => {
                           className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                         />
                       </div>
+                      <div className="flex flex-col gap-2 md:col-span-2">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">Complete Address</label>
+                        <textarea
+                          required
+                          name="address"
+                          value={formData.address}
+                          onChange={handleInputChange}
+                          placeholder="Street, Landmark, Apartment No."
+                          rows={3}
+                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">State</label>
+                        <input
+                          required
+                          name="state"
+                          value={formData.state}
+                          onChange={handleInputChange}
+                          placeholder="Gujarat"
+                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                        />
+                      </div>
                       <div className="flex flex-col gap-2">
                         <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">Pincode</label>
-                        <input 
+                        <input
                           required
                           name="pincode"
                           value={formData.pincode}
@@ -186,7 +264,7 @@ const CheckoutPage = () => {
                     </div>
                   </div>
 
-                  <button 
+                  <button
                     type="submit"
                     className="w-full bg-blue-600 text-white py-6 rounded-[24px] font-black uppercase tracking-[0.2em] text-sm shadow-2xl shadow-blue-200 hover:bg-blue-700 transition-all hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-3"
                   >
@@ -194,36 +272,48 @@ const CheckoutPage = () => {
                   </button>
                 </form>
               ) : (
+                /* ── Payment Step ── */
                 <form onSubmit={handleSubmit} className="flex flex-col gap-8">
-                  {/* Payment Section */}
                   <div className="bg-white rounded-[32px] p-8 md:p-10 border border-slate-100 shadow-sm flex flex-col gap-8">
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center">
                         <CreditCard className="w-6 h-6" />
                       </div>
-                      <h2 className="text-xl font-black uppercase tracking-tight text-blue-950">Scan & Pay</h2>
+                      <h2 className="text-xl font-black uppercase tracking-tight text-blue-950">Scan &amp; Pay</h2>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-10 items-center">
-                      {/* QR Code Column */}
+                      {/* QR Code */}
                       <div className="flex flex-col items-center gap-4 p-6 bg-slate-50 rounded-[32px] border border-slate-100">
-                        <div className="w-full aspect-square bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden relative">
-                          <img 
-                            src="/images/qr-dummy.png" 
-                            alt="Payment QR Code" 
-                            className="w-full h-full object-cover p-2"
+                        <div className="w-full aspect-square bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex items-center justify-center">
+                          <img
+                            src="/images/qr-dummy.png"
+                            alt="Payment QR Code"
+                            className="w-full h-full object-contain p-4"
+                            onError={(e) => {
+                              e.target.style.display = 'none';
+                              e.target.nextSibling.style.display = 'flex';
+                            }}
                           />
+                          <div className="hidden w-full h-full flex-col items-center justify-center gap-2 text-slate-300">
+                            <svg className="w-16 h-16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                            </svg>
+                            <span className="text-xs font-bold">QR Code</span>
+                          </div>
                         </div>
                         <p className="text-[10px] font-black uppercase tracking-widest text-blue-950/60 text-center">
-                          Scan with any UPI App (GPay, PhonePe, Paytm)
+                          Scan with GPay, PhonePe, or Paytm
                         </p>
                       </div>
 
                       {/* Input Column */}
                       <div className="flex flex-col gap-6">
                         <div className="flex flex-col gap-2">
-                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">Payment / Transaction ID</label>
-                          <input 
+                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">
+                            UPI / Transaction ID
+                          </label>
+                          <input
                             required
                             name="paymentId"
                             value={paymentData.paymentId}
@@ -232,18 +322,22 @@ const CheckoutPage = () => {
                             className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                           />
                         </div>
-                        
+
                         <div className="flex flex-col gap-2">
-                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">Upload Screenshot (Optional)</label>
+                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">
+                            Upload Screenshot <span className="text-slate-300">(optional)</span>
+                          </label>
                           <div className="relative group cursor-pointer">
-                            <input 
-                              type="file" 
+                            <input
+                              type="file"
                               accept="image/*"
                               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
                             />
                             <div className="w-full bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl px-5 py-8 text-center transition-all group-hover:border-blue-400 group-hover:bg-blue-50/30">
                               <ShieldCheck className="w-8 h-8 text-slate-300 mx-auto mb-2 group-hover:text-blue-500" />
-                              <span className="text-xs font-bold text-slate-400 group-hover:text-blue-600 uppercase tracking-widest">Select Image</span>
+                              <span className="text-xs font-bold text-slate-400 group-hover:text-blue-600 uppercase tracking-widest">
+                                Select Image
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -252,25 +346,29 @@ const CheckoutPage = () => {
 
                     <div className="bg-orange-50 p-4 rounded-2xl border border-orange-100 text-center">
                       <p className="text-[10px] font-black text-orange-800 uppercase tracking-widest leading-loose">
-                        Please pay the exact amount: ₹{cartTotal}. Your order will be confirmed after payment verification.
+                        Please pay exact amount: ₹{cartTotal.toLocaleString('en-IN')}. Your order will be confirmed after verification.
                       </p>
                     </div>
                   </div>
 
-                  <button 
+                  {submitError && (
+                    <div className="bg-red-50 border border-red-100 rounded-2xl p-4 text-center">
+                      <p className="text-red-500 text-sm font-bold">{submitError}</p>
+                    </div>
+                  )}
+
+                  <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="w-full bg-blue-600 text-white py-6 rounded-[24px] font-black uppercase tracking-[0.2em] text-sm shadow-2xl shadow-blue-200 hover:bg-blue-700 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-3"
+                    className="w-full bg-blue-600 text-white py-6 rounded-[24px] font-black uppercase tracking-[0.2em] text-sm shadow-2xl shadow-blue-200 hover:bg-blue-700 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-3"
                   >
                     {isSubmitting ? (
                       <>
                         <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        Verifying...
+                        Placing Order...
                       </>
                     ) : (
-                      <>
-                        Confirm Payment & Order
-                      </>
+                      'Confirm Payment & Place Order'
                     )}
                   </button>
                 </form>
@@ -280,17 +378,29 @@ const CheckoutPage = () => {
             {/* Order Summary Column */}
             <div className="lg:col-span-4 flex flex-col gap-6">
               <div className="bg-white rounded-[32px] p-8 border border-slate-100 shadow-sm sticky top-32">
-                <h3 className="text-sm font-black uppercase tracking-[0.2em] text-blue-950 mb-8 pb-4 border-b border-slate-50">Order Summary</h3>
-                
-                <div className="flex flex-col gap-6 max-h-[300px] overflow-y-auto pr-2 mb-8 scrollbar-hide">
+                <h3 className="text-sm font-black uppercase tracking-[0.2em] text-blue-950 mb-8 pb-4 border-b border-slate-50">
+                  Order Summary
+                </h3>
+
+                <div className="flex flex-col gap-6 max-h-[300px] overflow-y-auto pr-2 mb-8">
                   {cart.map((item) => (
                     <div key={item.id} className="flex gap-4">
                       <div className="w-16 h-16 rounded-xl bg-slate-50 border border-slate-100 overflow-hidden flex-shrink-0">
-                        <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+                        {item.image ? (
+                          <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full bg-slate-100 flex items-center justify-center">
+                            <svg className="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                          </div>
+                        )}
                       </div>
                       <div className="flex flex-col justify-center gap-1">
                         <p className="text-xs font-black uppercase text-blue-950 line-clamp-1">{item.name}</p>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{item.quantity} x ₹{item.price}</p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                          {item.quantity} × ₹{(item.priceValue ?? item.price ?? 0).toLocaleString('en-IN')}
+                        </p>
                       </div>
                     </div>
                   ))}
@@ -299,7 +409,7 @@ const CheckoutPage = () => {
                 <div className="flex flex-col gap-4 pt-6 border-t border-slate-50">
                   <div className="flex justify-between text-sm">
                     <span className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">Subtotal</span>
-                    <span className="font-bold text-blue-950">₹{cartTotal}</span>
+                    <span className="font-bold text-blue-950">₹{cartTotal.toLocaleString('en-IN')}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">Shipping</span>
@@ -307,14 +417,16 @@ const CheckoutPage = () => {
                   </div>
                   <div className="flex justify-between text-base pt-4 border-t border-slate-50 mt-2">
                     <span className="text-blue-950 font-black uppercase tracking-tight">Total Amount</span>
-                    <span className="font-black text-blue-600">₹{cartTotal}</span>
+                    <span className="font-black text-blue-600">₹{cartTotal.toLocaleString('en-IN')}</span>
                   </div>
                 </div>
 
                 <div className="mt-8 flex flex-col gap-4 bg-orange-50/50 p-6 rounded-2xl border border-orange-100">
                   <div className="flex gap-3 items-center">
                     <ShieldCheck className="w-5 h-5 text-orange-500" />
-                    <span className="text-[10px] font-black uppercase tracking-widest text-orange-900 leading-tight">Secure Transaction Guaranteed</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-orange-900 leading-tight">
+                      Secure Transaction Guaranteed
+                    </span>
                   </div>
                 </div>
               </div>

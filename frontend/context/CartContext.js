@@ -1,41 +1,94 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { fetchCart, createCart, updateCart } from '../lib/api';
 
 const CartContext = createContext();
+
+/**
+ * Normalise a product before adding to cart.
+ * Handles both old static-JSON shape and new API shape.
+ */
+function normaliseCartProduct(product) {
+  return {
+    ...product,
+    // Image: prefer explicit image field, fall back to img (API), then null
+    image: product.image || product.img || null,
+    // Numeric price for arithmetic: prefer price_value, then parse price string
+    priceValue:
+      product.price_value ??
+      product.priceValue ??
+      parseFloat(String(product.price ?? "0").replace(/[^\d.]/g, "")) ??
+      0,
+  };
+}
+
+import { useAuth } from './AuthContext';
+import { useRouter } from 'next/navigation';
 
 export const CartProvider = ({ children }) => {
   const [cart, setCart] = useState([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [sessionId, setSessionId] = useState(null);
+  const [cartId, setCartId] = useState(null);
+  const [isReady, setIsReady] = useState(false);
+  
+  const { isAuthenticated } = useAuth();
+  const router = useRouter();
 
-  // Load cart from localStorage on mount (optional - for better persistence)
+  // 1. Initialise session and load backend cart
   useEffect(() => {
-    const savedCart = localStorage.getItem('soulcraft_cart');
-    if (savedCart) {
-      try {
-        setCart(JSON.parse(savedCart));
-      } catch (e) {
-        console.error("Failed to parse cart", e);
-      }
+    let sid = localStorage.getItem('soulcraft_session_id');
+    if (!sid) {
+      sid = 'sess_' + Math.random().toString(36).substring(2, 15);
+      localStorage.setItem('soulcraft_session_id', sid);
     }
+    setSessionId(sid);
+
+    fetchCart(sid).then((beCart) => {
+      if (beCart) {
+        setCartId(beCart.id || beCart._id);
+        setCart(beCart.items || []);
+        setIsReady(true);
+      } else {
+        createCart({ session_id: sid, items: [], total_amount: 0 }).then((newCart) => {
+          setCartId(newCart.id || newCart._id);
+          setIsReady(true);
+        }).catch(() => setIsReady(true));
+      }
+    }).catch(() => setIsReady(true));
   }, []);
 
-  // Save cart to localStorage whenever it changes
+  // 2. Sync cart to backend on change (debounced implicitly by natural user actions)
+  // We use calculate total synchronously for the payload
   useEffect(() => {
-    localStorage.setItem('soulcraft_cart', JSON.stringify(cart));
-  }, [cart]);
+    if (!isReady || !cartId) return;
+    const totalAmount = cart.reduce(
+        (sum, item) => sum + (item.priceValue ?? item.price ?? 0) * item.quantity,
+        0
+    );
+    updateCart(cartId, { items: cart, total_amount: totalAmount }).catch(console.error);
+  }, [cart, isReady, cartId]);
 
   const addToCart = (product) => {
+    if (!isAuthenticated) {
+      // Redirect to login with current path as redirect param
+      const path = typeof window !== 'undefined' ? window.location.pathname : '/shop';
+      router.push(`/login?redirect=${path}`);
+      return;
+    }
+
+    const norm = normaliseCartProduct(product);
     setCart((prev) => {
-      const existingProduct = prev.find((item) => item.id === product.id);
-      if (existingProduct) {
+      const existing = prev.find((item) => item.id === norm.id);
+      if (existing) {
         return prev.map((item) =>
-          item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+          item.id === norm.id ? { ...item, quantity: item.quantity + 1 } : item
         );
       }
-      return [...prev, { ...product, quantity: 1 }];
+      return [...prev, { ...norm, quantity: 1 }];
     });
-    setIsCartOpen(true); // Auto-open cart when adding
+    setIsCartOpen(true);
   };
 
   const removeFromCart = (productId) => {
@@ -46,8 +99,8 @@ export const CartProvider = ({ children }) => {
     setCart((prev) =>
       prev.map((item) => {
         if (item.id === productId) {
-          const newQuantity = Math.max(1, item.quantity + amount);
-          return { ...item, quantity: newQuantity };
+          const newQty = Math.max(1, item.quantity + amount);
+          return { ...item, quantity: newQty };
         }
         return item;
       })
@@ -56,27 +109,37 @@ export const CartProvider = ({ children }) => {
 
   const clearCart = () => {
     setCart([]);
-    localStorage.removeItem('soulcraft_cart');
   };
 
-  const toggleCart = () => setIsCartOpen(!isCartOpen);
+  const toggleCart = () => setIsCartOpen((o) => !o);
 
-  const cartCount = cart.reduce((total, item) => total + item.quantity, 0);
-  const cartTotal = cart.reduce((total, item) => total + item.price * item.quantity, 0);
+  /** Total item count across all cart lines */
+  const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+
+  /**
+   * Monetary total — uses priceValue (numeric) so it works with both
+   * static JSON products (numeric price) and API products (price_value).
+   */
+  const cartTotal = cart.reduce(
+    (sum, item) => sum + (item.priceValue ?? item.price ?? 0) * item.quantity,
+    0
+  );
 
   return (
-    <CartContext.Provider value={{ 
-      cart, 
-      addToCart, 
-      removeFromCart, 
-      updateQuantity, 
-      clearCart,
-      isCartOpen, 
-      toggleCart, 
-      cartCount, 
-      cartTotal,
-      setIsCartOpen
-    }}>
+    <CartContext.Provider
+      value={{
+        cart,
+        addToCart,
+        removeFromCart,
+        updateQuantity,
+        clearCart,
+        isCartOpen,
+        toggleCart,
+        cartCount,
+        cartTotal,
+        setIsCartOpen,
+      }}
+    >
       {children}
     </CartContext.Provider>
   );
@@ -89,3 +152,4 @@ export const useCart = () => {
   }
   return context;
 };
+
