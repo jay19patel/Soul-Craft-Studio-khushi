@@ -10,7 +10,7 @@ import Link from 'next/link';
 import { createOrder } from '../../lib/api';
 
 const CheckoutPage = () => {
-  const { cart, cartTotal, clearCart } = useCart();
+  const { cart, cartTotal, clearCart, cartId } = useCart();
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
@@ -85,6 +85,7 @@ const CheckoutPage = () => {
         payment_status: paymentData.paymentId ? 'pending_verification' : 'pending_verification',
         notes: null,
         status: 'pending',
+        cart_id: cartId || null,
       };
 
       const createdOrder = await createOrder(payload);

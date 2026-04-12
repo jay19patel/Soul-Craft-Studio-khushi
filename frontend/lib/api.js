@@ -8,13 +8,20 @@
  * in both dev (localhost:8000) and production without code changes.
  */
 
-export const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+export const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api").replace(/\/$/, "");
+export const MEDIA_BASE = API_BASE.includes("/api") ? API_BASE.split("/api")[0] : API_BASE;
 
 // ── Low-level fetch wrapper ───────────────────────────────────────────────
 
 async function apiFetch(path, options = {}) {
-  const url = `${API_BASE}${path}`;
+  // Defensive check for malformed paths
+  if (path.includes("[object Object]")) {
+    console.error("apiFetch error: Path contains [object Object]. This is likely due to an object being passed instead of an ID string.", { path });
+    throw new Error("Invalid API path: contains [object Object]");
+  }
+
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  const url = `${API_BASE}${cleanPath}`;
   
   // Get token from localStorage (if in browser)
   let authHeader = {};
@@ -25,30 +32,35 @@ async function apiFetch(path, options = {}) {
     }
   }
 
-  const res = await fetch(url, {
-    headers: { 
-      "Content-Type": "application/json", 
-      ...authHeader,
-      ...options.headers 
-    },
-    ...options,
-  });
+  try {
+    const res = await fetch(url, {
+      headers: { 
+        "Content-Type": "application/json", 
+        ...authHeader,
+        ...options.headers 
+      },
+      ...options,
+    });
 
-  if (!res.ok) {
-    let errorMessage = `API error ${res.status}`;
-    try {
-      const body = await res.json();
-      errorMessage = body?.detail || body?.message || errorMessage;
-    } catch {
-      // non-JSON error body — keep default message
+    if (!res.ok) {
+      let errorMessage = `API error ${res.status}`;
+      try {
+        const body = await res.json();
+        errorMessage = body?.detail || body?.message || errorMessage;
+      } catch {
+        // non-JSON error body — keep default message
+      }
+      throw new Error(errorMessage);
     }
-    throw new Error(errorMessage);
+
+    // 204 No Content
+    if (res.status === 204) return null;
+
+    return res.json();
+  } catch (err) {
+    console.error(`apiFetch failed for ${url}:`, err);
+    throw err;
   }
-
-  // 204 No Content
-  if (res.status === 204) return null;
-
-  return res.json();
 }
 
 // ── Query string builder ──────────────────────────────────────────────────
@@ -74,7 +86,8 @@ function buildQuery(params = {}) {
  */
 export async function getCategories() {
   const data = await apiFetch(`/categories/${buildQuery({ page_size: 100 })}`);
-  return data?.results ?? [];
+  const results = data?.results ?? [];
+  return results.map(normalizeCategory);
 }
 
 /**
@@ -123,6 +136,18 @@ export async function createOrder(payload) {
  */
 export async function getOrder(id) {
   return apiFetch(`/orders/${id}`);
+}
+
+/**
+ * Fetch current user's orders (authenticated).
+ */
+export async function getMyOrders(params = {}) {
+  const data = await apiFetch(`/orders/${buildQuery({
+    page_size: 50,
+    sort: "-created_at",
+    ...params
+  })}`);
+  return (data?.results ?? []).map(normalizeOrder);
 }
 
 /**
@@ -192,15 +217,43 @@ export async function logout() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// PAYMENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Fetch all payments for the current user.
+ */
+export async function getPayments(params = {}) {
+  const data = await apiFetch(`/payments/${buildQuery({
+    page_size: 100,
+    sort: "-created_at",
+    ...params
+  })}`);
+  return (data?.results ?? []).map(normalizePayment);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // CARTS
 // ═══════════════════════════════════════════════════════════════════════════
 
-export async function fetchCart(sessionId) {
-  const data = await apiFetch(`/carts/${buildQuery({ session_id: sessionId })}`);
+export async function fetchCart(params = {}) {
+  const data = await apiFetch(`/carts/${buildQuery(params)}`);
   if (data?.results?.length > 0) {
     return data.results[0];
   }
   return null;
+}
+
+/**
+ * Smart helper to fetch the ONE active (non-ordered) cart for a user or session.
+ */
+export async function fetchActiveCart(userId, sessionId) {
+  const params = { is_ordered: false };
+  if (userId) params.user_id = userId;
+  else if (sessionId) params.session_id = sessionId;
+  else return null;
+
+  return fetchCart(params);
 }
 
 export async function createCart(payload) {
@@ -222,6 +275,32 @@ export async function updateCart(cartId, payload) {
 // ════════════════════════════════════════════════════════════════════════════
 
 /**
+ * Normalise a raw backend category object.
+ */
+export function normalizeCategory(c) {
+  if (!c) return null;
+
+  const getImageUrl = (val) => {
+    if (!val) return null;
+    if (typeof val === "string") {
+      if (val.startsWith("/")) return `${MEDIA_BASE}${val}`;
+      return val;
+    }
+    const path = val.file_path || val.url || null;
+    if (path && path.startsWith("/")) {
+      return `${MEDIA_BASE}${path}`;
+    }
+    return path;
+  };
+
+  return {
+    ...c,
+    img: getImageUrl(c.img),
+    image: getImageUrl(c.img), // alias for consistency
+  };
+}
+
+/**
  * Normalise a raw backend product object to the shape the frontend expects.
  */
 export function normalizeProduct(p) {
@@ -229,14 +308,25 @@ export function normalizeProduct(p) {
 
   const getImageUrl = (val) => {
     if (!val) return null;
-    if (typeof val === "string") return val;
-    return val.file_path || val.url || null;
+    if (typeof val === "string") {
+      if (val.startsWith("/")) return `${MEDIA_BASE}${val}`;
+      return val;
+    }
+    const path = val.file_path || val.url || null;
+    if (path && path.startsWith("/")) {
+      return `${MEDIA_BASE}${path}`;
+    }
+    return path;
   };
 
   const mainImage = getImageUrl(p.img || p.image);
   
+  // Beanie documents have 'id' (string) or '_id' (PydanticObjectId)
+  const productId = String(p.id || p._id || "");
+
   return {
     ...p,
+    id: productId, // Ensure ID is a clean string at the top level
     image: mainImage,
     images: (p.images || []).map(getImageUrl).filter(Boolean),
     priceValue: p.price_value ?? 0,
@@ -256,5 +346,20 @@ export function normalizeOrder(o) {
       ...item,
       image: item.image || null,
     })),
+  };
+}
+
+/**
+ * Normalise a raw backend payment object.
+ */
+export function normalizePayment(p) {
+  if (!p) return null;
+  const formatDate = (d) => d ? new Date(d).toLocaleString("en-IN") : null;
+  return {
+    ...p,
+    submittedAt: formatDate(p.submitted_at),
+    receivedAt: formatDate(p.received_at),
+    confirmedAt: formatDate(p.confirmed_at),
+    createdAt: formatDate(p.created_at),
   };
 }

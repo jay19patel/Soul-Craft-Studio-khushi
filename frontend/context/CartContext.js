@@ -33,51 +33,79 @@ export const CartProvider = ({ children }) => {
   const [cartId, setCartId] = useState(null);
   const [isReady, setIsReady] = useState(false);
   
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const router = useRouter();
 
   // 1. Initialise session and load backend cart
   useEffect(() => {
-    let sid = localStorage.getItem('soulcraft_session_id');
-    if (!sid) {
-      sid = 'sess_' + Math.random().toString(36).substring(2, 15);
-      localStorage.setItem('soulcraft_session_id', sid);
-    }
-    setSessionId(sid);
-
-    fetchCart(sid).then((beCart) => {
-      if (beCart) {
-        setCartId(beCart.id || beCart._id);
-        setCart(beCart.items || []);
-        setIsReady(true);
-      } else {
-        createCart({ session_id: sid, items: [], total_amount: 0 }).then((newCart) => {
-          setCartId(newCart.id || newCart._id);
-          setIsReady(true);
-        }).catch(() => setIsReady(true));
+    const initCart = async () => {
+      let sid = localStorage.getItem('soulcraft_session_id');
+      if (!sid) {
+        sid = 'sess_' + Math.random().toString(36).substring(2, 15);
+        localStorage.setItem('soulcraft_session_id', sid);
       }
-    }).catch(() => setIsReady(true));
-  }, []);
+      setSessionId(sid);
 
-  // 2. Sync cart to backend on change (debounced implicitly by natural user actions)
-  // We use calculate total synchronously for the payload
+      try {
+        const userId = user?.id || user?._id;
+        let activeCart = await fetchActiveCart(userId, sid);
+
+        if (activeCart) {
+          // If we found a cart by session but now we're logged in, link it to user
+          if (isAuthenticated && userId && !activeCart.user_id) {
+            try {
+              activeCart = await updateCart(activeCart.id, { user_id: userId });
+            } catch (err) {
+              console.warn("Could not link session cart to user (already has one?), fetching user cart instead.");
+              activeCart = await fetchActiveCart(userId, null);
+            }
+          }
+          
+          setCartId(String(activeCart.id || activeCart._id || ''));
+          setCart(activeCart.items || []);
+        } else {
+          // Create new cart
+          const payload = { session_id: sid, items: [], total_amount: 0 };
+          if (isAuthenticated && userId) payload.user_id = userId;
+          
+          const newCart = await createCart(payload);
+          setCartId(String(newCart.id || newCart._id || ''));
+          setCart([]);
+        }
+      } catch (err) {
+        console.error("Cart initialization failed:", err);
+      } finally {
+        setIsReady(true);
+      }
+    };
+
+    initCart();
+  }, [isAuthenticated, user]);
+
+  // 2. Sync cart to backend on change
   useEffect(() => {
     if (!isReady || !cartId) return;
+    
     const totalAmount = cart.reduce(
         (sum, item) => sum + (item.priceValue ?? item.price ?? 0) * item.quantity,
         0
     );
     
-    // Normalise items for API precisely: use product_id and numeric priceValue
+    // Normalise items for API precisely
     const payloadItems = cart.map(item => ({
-      product_id: item.id || item._id || item.product_id,
+      product: String(item.product || item.id || item._id || ""),
       name: item.name,
       quantity: item.quantity,
       price: item.priceValue || (typeof item.price === 'string' ? parseFloat(item.price.replace(/[^\d.]/g, '')) : item.price),
       image: item.image
     }));
 
-    updateCart(cartId, { items: payloadItems, total_amount: totalAmount }).catch(console.error);
+    // We don't want to trigger sync on every keystroke if possible, 
+    // but useEffect dependency on [cart] does this. 
+    // For small carts it's fine.
+    updateCart(cartId, { items: payloadItems, total_amount: totalAmount }).catch(err => {
+        console.error("Cart sync failed:", err);
+    });
   }, [cart, isReady, cartId]);
 
   const addToCart = (product) => {
@@ -139,6 +167,7 @@ export const CartProvider = ({ children }) => {
     <CartContext.Provider
       value={{
         cart,
+        cartId,
         addToCart,
         removeFromCart,
         updateQuantity,

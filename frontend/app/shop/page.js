@@ -22,7 +22,10 @@ const ShopPage = () => {
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
 
   // Load categories once
@@ -32,24 +35,43 @@ const ShopPage = () => {
       .catch(() => setCategories([]));
   }, []);
 
-  // Re-fetch products whenever selected category changes
-  const fetchProducts = useCallback(async () => {
-    setLoading(true);
+  // Re-fetch products locally or from server
+  const fetchProducts = useCallback(async (isLoadMore = false) => {
+    if (isLoadMore) setLoadingMore(true);
+    else {
+      setLoading(true);
+      setPage(1); // Reset to first page on category change
+    }
     setError(null);
+
     try {
-      const params = {};
+      const params = { page: isLoadMore ? page + 1 : 1, page_size: 16 };
       if (selectedCategory !== 'all') params.category_id = selectedCategory;
+      
       const data = await getProducts(params);
-      setProducts((data?.results ?? []).map(normalizeProduct));
+      const newProducts = (data?.results ?? []).map(normalizeProduct);
+      
+      if (isLoadMore) {
+        setProducts(prev => [...prev, ...newProducts]);
+        setPage(prev => prev + 1);
+      } else {
+        setProducts(newProducts);
+        setPage(1);
+      }
+      setTotalCount(data?.total ?? 0);
     } catch (err) {
       setError(err.message || 'Failed to load products.');
-      setProducts([]);
+      if (!isLoadMore) setProducts([]);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
-  }, [selectedCategory]);
+  }, [selectedCategory, page]);
 
-  useEffect(() => { fetchProducts(); }, [fetchProducts]);
+  // Initial load and category switch
+  useEffect(() => {
+    fetchProducts(false);
+  }, [selectedCategory]);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900 selection:bg-orange-200">
@@ -68,6 +90,11 @@ const ShopPage = () => {
             Explore our complete collection of handcrafted wool art, apparel, and
             decorations. Each piece is made with love and attention to detail.
           </p>
+          {!loading && !error && (
+            <div className="mt-8 px-6 py-2 bg-white/50 backdrop-blur-sm rounded-full border border-slate-100 inline-block mx-auto text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+              Showing {products.length} of {totalCount} Products
+            </div>
+          )}
         </div>
 
         {/* Category Filters */}
@@ -177,6 +204,34 @@ const ShopPage = () => {
                     </div>
                   </div>
                 ))}
+          </div>
+        )}
+
+        {/* Load More */}
+        {!loading && !error && products.length < totalCount && (
+          <div className="mt-20 flex justify-center">
+            <button
+              onClick={() => fetchProducts(true)}
+              disabled={loadingMore}
+              className="px-12 py-4 bg-white border-2 border-slate-200 text-blue-950 rounded-full text-sm font-black uppercase tracking-widest hover:bg-slate-50 hover:border-blue-200 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-3 shadow-lg shadow-slate-100 group"
+            >
+              {loadingMore ? (
+                <>
+                  <svg className="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Loading More...
+                </>
+              ) : (
+                <>
+                  Load More Designs
+                  <svg className="w-5 h-5 group-hover:translate-y-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 13l-7 7-7-7m14-8l-7 7-7-7" />
+                  </svg>
+                </>
+              )}
+            </button>
           </div>
         )}
 
