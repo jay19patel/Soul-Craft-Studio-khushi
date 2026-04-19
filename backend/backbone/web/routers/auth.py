@@ -54,26 +54,25 @@ async def register_user(registration_data: RegisterSchema):
     except ConflictException as exc:
         raise HTTPException(status_code=409, detail=exc.message)
 
-    if settings.REQUIRE_EMAIL_VERIFICATION and new_user.verification_token:
-        try:
-            await mail_service.send_email_verification(
-                to_email=new_user.email,
-                full_name=new_user.full_name,
-                verification_token=new_user.verification_token,
-            )
-        except Exception as exc:
-            logger.error("Failed to send verification email to %s: %s", new_user.email, exc)
+    from backbone.services.tasks import task_service
 
-    # ? Always send welcome on successful signup (in addition to verification when enabled).
-    try:
-        await mail_service.send_welcome_email(
+    if settings.REQUIRE_EMAIL_VERIFICATION and new_user.verification_token:
+        await task_service.enqueue(
+            "backbone.services.mail.mail_service.send_email_verification",
             to_email=new_user.email,
             full_name=new_user.full_name,
+            verification_token=new_user.verification_token,
         )
-    except Exception as exc:
-        logger.error("Failed to send welcome email to %s: %s", new_user.email, exc)
 
-    return _build_user_out(new_user)
+    # ? Always send welcome on successful signup (in addition to verification when enabled).
+    await task_service.enqueue(
+        "backbone.services.mail.mail_service.send_welcome_email",
+        to_email=new_user.email,
+        full_name=new_user.full_name,
+    )
+
+    profile_image_path = await _resolve_user_profile_image_path(new_user)
+    return _build_user_out(new_user, profile_image_path=profile_image_path)
 
 
 # ── Login ──────────────────────────────────────────────────────────────────
@@ -146,15 +145,12 @@ async def login_with_google(response: Response, body: GoogleLoginSchema, request
     )
 
     if is_new_google_user:
-        try:
-            welcome_mail = MailService()
-            await welcome_mail.send_welcome_email(to_email=user.email, full_name=user.full_name)
-        except Exception as exc:
-            logger.error(
-                "Failed to send welcome email after Google signup to %s: %s",
-                user.email,
-                exc,
-            )
+        from backbone.services.tasks import task_service
+        await task_service.enqueue(
+            "backbone.services.mail.mail_service.send_welcome_email", 
+            to_email=user.email, 
+            full_name=user.full_name
+        )
 
     response.set_cookie(
         key="refresh_token",
@@ -194,7 +190,8 @@ async def verify_email_address(token: str):
 @router.get("/me", response_model=UserOut)
 async def get_current_user_profile(current_user=Depends(get_current_user)):
     """Return the authenticated user's profile."""
-    return _build_user_out(current_user)
+    profile_image_path = await _resolve_user_profile_image_path(current_user)
+    return _build_user_out(current_user, profile_image_path=profile_image_path)
 
 
 # ── Logout ─────────────────────────────────────────────────────────────────
@@ -226,15 +223,14 @@ async def request_password_reset(body: PasswordResetRequestSchema):
 
     reset_token = await auth_service.generate_password_reset_token(body.email)
     if reset_token:
+        from backbone.services.tasks import task_service
         user = await auth_service.find_user_by_email(body.email)
-        try:
-            await mail_service.send_password_reset_email(
-                to_email=body.email,
-                full_name=user.full_name if user else "User",
-                reset_token=reset_token,
-            )
-        except Exception as exc:
-            logger.error("Failed to send password reset email to %s: %s", body.email, exc)
+        await task_service.enqueue(
+            "backbone.services.mail.mail_service.send_password_reset_email",
+            to_email=body.email,
+            full_name=user.full_name if user else "User",
+            reset_token=reset_token,
+        )
 
     return {"success": True, "message": "If that email exists, a reset link has been sent."}
 
@@ -257,28 +253,41 @@ async def confirm_password_reset(body: PasswordResetConfirmSchema):
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 
-def _user_profile_image_public_url(user) -> str | None:
-    """Public URL/path for ``profile_image`` when the linked ``Attachment`` is loaded."""
+async def _resolve_user_profile_image_path(user) -> str | None:
+    """
+    Resolve the public URL/path for ``profile_image``.
+    Explicitly fetches the link if it is not yet hydrated.
+    """
     attachment = user.profile_image
     if attachment is None:
         return None
-    from backbone.domain.models import Attachment
 
+    from backbone.domain.models import Attachment
+    from beanie.odm.fields import Link
+
+    # 1. Already loaded Attachment object
     if isinstance(attachment, Attachment):
         return attachment.file_path
 
-    # ? If Beanie hasn't fully hydrated the link, we might find the document inside the Link object.
-    from beanie.odm.fields import Link as LinkField
-
-    if isinstance(attachment, LinkField):
-        linked_doc = getattr(attachment, "document", None) or getattr(attachment, "_document", None)
-        if linked_doc and hasattr(linked_doc, "file_path"):
-            return linked_doc.file_path
+    # 2. Beanie Link object (needs fetch if not already in .document)
+    if isinstance(attachment, Link):
+        # ? Try to get already-hydrated doc inside the Link wrapper first
+        hydrated = getattr(attachment, "document", None) or getattr(attachment, "_document", None)
+        if hydrated and hasattr(hydrated, "file_path"):
+            return hydrated.file_path
+        
+        # ? Fallback: perform async fetch
+        try:
+            loaded = await attachment.fetch()
+            if isinstance(loaded, Attachment):
+                return loaded.file_path
+        except Exception:
+            logger.debug("Failed to fetch profile_image link for user %s", user.id)
 
     return None
 
 
-def _build_user_out(user) -> UserOut:
+def _build_user_out(user, profile_image_path: str | None = None) -> UserOut:
     return UserOut(
         id=str(user.id),
         email=user.email,
@@ -287,7 +296,7 @@ def _build_user_out(user) -> UserOut:
         is_active=user.is_active,
         is_verified=user.is_verified,
         is_google_account=bool(getattr(user, "is_google_account", False)),
-        profile_image=_user_profile_image_public_url(user),
+        profile_image=profile_image_path,
         headline=user.headline,
         created_at=user.created_at,
     )

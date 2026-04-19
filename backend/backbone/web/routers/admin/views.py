@@ -537,35 +537,74 @@ async def admin_backbone_settings_page(
 # ── Export / Import / Wipe ──────────────────────────────────────────────────
 
 
-@router.get("/export")
+@router.get("/export", response_class=HTMLResponse)
+async def admin_export_page(
+    request: Request,
+    admin_user: User | None = Depends(resolve_admin_user_from_cookie),
+):
+    """Render the selective data export selection page."""
+    if not admin_user:
+        return _redirect_to_login()
+
+    return templates.TemplateResponse(
+        request,
+        "export.html",
+        {
+            "user": admin_user,
+            "models": admin_site.get_all_registered_models(),
+            "now": datetime.now(UTC),
+        },
+    )
+
+
+@router.post("/export")
 async def handle_admin_data_export(
+    request: Request,
     admin_user: User | None = Depends(resolve_admin_user_from_cookie),
 ):
     """
-    Export all documents from all registered models as a JSON file.
-    Identifies each collection by its registered model name.
+    Process selective data export. Fetches documents only for the models
+    selected in the export form.
     """
     if not admin_user:
         return _redirect_to_login()
+
+    form_data = await request.form()
+    selected_model_names = form_data.getlist("models")
+
+    if not selected_model_names:
+        return RedirectResponse(
+            url=f"{settings.ADMIN_PREFIX}/export?error=SelectionRequired&detail=Please+select+at+least+one+collection+to+export",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
 
     export_payload: dict[str, list[dict]] = {}
     registered_models = admin_site.get_all_registered_models()
 
     for model_config in registered_models:
-        model = model_config["model"]
         model_name = model_config["name"]
+        if model_name not in selected_model_names:
+            continue
+
+        model = model_config["model"]
         try:
             # ? We use find_all() to fetch everything for this collection
             documents = await model.find_all().to_list()
             # ? Use mode="json" so ObjectIds and Datetimes are automatically converted to strings
             export_payload[model_name] = [doc.model_dump(mode="json") for doc in documents]
         except Exception as exc:
-            logger.error("Export failed for model %s: %s", model_name, exc)
+            logger.error("Selective export failed for model %s: %s", model_name, exc)
             export_payload[model_name] = []
 
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     safe_app_name = settings.APP_NAME.lower().replace(" ", "_")
-    filename = f"{safe_app_name}_export_{timestamp}.json"
+    
+    # ? If specific models were selected, reflect that in the filename if it's a small subset
+    if 0 < len(selected_model_names) <= 3:
+        subset_str = "_".join(selected_model_names).lower()
+        filename = f"{safe_app_name}_{subset_str}_export_{timestamp}.json"
+    else:
+        filename = f"{safe_app_name}_export_{timestamp}.json"
 
     # ? Package payload as JSON bytes for download
     json_bytes = json.dumps(export_payload, indent=2, default=str).encode("utf-8")

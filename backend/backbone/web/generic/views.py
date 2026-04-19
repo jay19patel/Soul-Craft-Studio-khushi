@@ -76,6 +76,14 @@ class GenericListView(ListMixin):
             sort: str | None = Query(None, description="Sort field, prefix - for descending"),
         ) -> dict[str, Any]:
             base_query = await view.get_queryset(request, user)
+
+            # ? Integrate permission-driven queryset filtering
+            for perm_class in view.permission_classes:
+                perm_instance = perm_class(request, user)
+                perm_filter = await perm_instance.get_queryset_filter()
+                if perm_filter:
+                    base_query.update(perm_filter)
+
             filtered_query = await view.filter_queryset(base_query, request)
             results, total = await view.perform_list(
                 filtered_query,
@@ -174,6 +182,14 @@ class GenericCrudView(ListMixin, CreateMixin, RetrieveMixin, UpdateMixin, Delete
             sort: str | None = Query(None),
         ) -> dict[str, Any]:
             base_query = await view.get_queryset(request, user)
+
+            # ? Integrate permission-driven queryset filtering
+            for perm_class in view.permission_classes:
+                perm_instance = perm_class(request, user)
+                perm_filter = await perm_instance.get_queryset_filter()
+                if perm_filter:
+                    base_query.update(perm_filter)
+
             filtered_query = await view.filter_queryset(base_query, request)
             results, total = await view.perform_list(
                 filtered_query,

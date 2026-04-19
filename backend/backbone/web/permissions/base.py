@@ -107,6 +107,13 @@ class BasePermission(metaclass=BasePermissionMetaclass):
     async def has_object_permission(self, obj: Any) -> bool:
         return True
 
+    async def get_queryset_filter(self) -> dict[str, Any]:
+        """
+        Return a MongoDB filter dict to be applied to list querysets.
+        Used for automatic data scoping (e.g. only show items owned by this user).
+        """
+        return {}
+
 
 # ── Built-in Permissions ───────────────────────────────────────────────────
 
@@ -204,6 +211,12 @@ class IsOwner(BasePermission):
             obj.get("created_by") if isinstance(obj, dict) else getattr(obj, "created_by", None)
         )
         return str(creator_id) == str(self.user.id)
+
+    async def get_queryset_filter(self) -> dict[str, Any]:
+        """Auto-scope queryset to items created by the current user."""
+        if not self.user:
+            return {"_id": "none"}  # Force empty result if not logged in
+        return {"created_by": str(self.user.id)}
 
 
 # ── Permission Dependency Factory ──────────────────────────────────────────

@@ -41,10 +41,11 @@ class BackboneSettings(BaseSettings):
     MONGODB_URL: str = "mongodb://localhost:27017"
     DATABASE_NAME: str = "backbone_app"
 
-    # ── Redis ──────────────────────────────────────────────────────────────
+    # ── Redis & Background Tasks ───────────────────────────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"
     CACHE_ENABLED: bool = False
     CACHE_TTL_SECONDS: int = 300
+    TASK_BACKEND: str = "asyncio"  # asyncio | redis
     TASK_QUEUE_NAME: str = "backbone:tasks"
     WORKER_CONCURRENCY: int = 4
 

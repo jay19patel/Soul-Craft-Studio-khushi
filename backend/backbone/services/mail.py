@@ -16,6 +16,7 @@
 import asyncio
 import logging
 import smtplib
+from datetime import UTC, datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr, make_msgid
@@ -88,8 +89,33 @@ class MailService:
 
         html_content = self._resolve_email_html_content(template_name, context, html_body)
         message = self._build_mime_message(to_email, subject, html_content)
-        await asyncio.to_thread(self._deliver_via_smtp, message)
-        logger.info("Email delivered to %s — subject: %s", to_email, subject)
+
+        # ? Persist audit log in MongoDB
+        from backbone.core.enums import EmailStatus
+        from backbone.domain.models import Email
+
+        email_log = Email(
+            to_email=to_email,
+            subject=subject,
+            template_name=template_name,
+            context=context,
+            html_body=html_content,
+            status=EmailStatus.PROCESSING,
+            started_at=datetime.now(UTC),
+        )
+        await email_log.insert()
+
+        try:
+            await asyncio.to_thread(self._deliver_via_smtp, message)
+            email_log.status = EmailStatus.SENT
+            email_log.sent_at = datetime.now(UTC)
+            logger.info("Email delivered to %s — subject: %s", to_email, subject)
+        except Exception as exc:
+            email_log.status = EmailStatus.FAILED
+            email_log.error_message = str(exc)
+            logger.error("Failed to deliver email to %s: %s", to_email, exc)
+        
+        await email_log.save()
 
     def _resolve_email_html_content(
         self,

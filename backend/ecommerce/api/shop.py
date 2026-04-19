@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import ValidationError
 from pymongo.errors import DuplicateKeyError
 
-from backbone import AllowAny, GenericCrudView, IsAuthenticated
+from backbone import AllowAny, BasePermission, GenericCrudView, IsAuthenticated
 from backbone.core.dependencies import get_current_user
 from backbone.domain.models import Attachment, User
 from ecommerce.models import (
@@ -149,33 +149,74 @@ class ProductView(GenericCrudView):
         return query
 
 
+
+class IsOrderOwner(BasePermission):
+    """
+    Professional Order Isolation:
+    - Admins/Superusers see everything.
+    - Regular users see:
+      1. Orders linked to their User account (domain link).
+      2. Orders with their email (guest recovery).
+      3. Orders they created (audit field).
+    """
+
+    async def get_queryset_filter(self) -> dict[str, Any]:
+        if not self.user:
+            return {"_id": "none"}
+
+        # ? Framework standard: Admin & Superuser bypass scoping
+        from backbone.core.enums import UserRole
+
+        if self.user.role in {UserRole.ADMIN, UserRole.SUPERUSER}:
+            return {}
+
+        user_link = link_to_existing_document(User, str(self.user.id))
+        return {
+            "$or": [
+                {"user": user_link},
+                {"customer_email": {"$regex": f"^{re.escape(self.user.email)}$", "$options": "i"}},
+                {"created_by": str(self.user.id)},
+            ]
+        }
+
+    async def has_object_permission(self, obj: Any) -> bool:
+        if not self.user:
+            return False
+
+        from backbone.core.enums import UserRole
+
+        if self.user.role in {UserRole.ADMIN, UserRole.SUPERUSER}:
+            return True
+
+        # ? Check link
+        user_id = str(self.user.id)
+        owner_link_id = _extract_id_from_link(obj.get("user") if isinstance(obj, dict) else getattr(obj, "user", None))
+        if owner_link_id == user_id:
+            return True
+
+        # ? Check audit field
+        creator_id = obj.get("created_by") if isinstance(obj, dict) else getattr(obj, "created_by", None)
+        if str(creator_id) == user_id:
+            return True
+
+        # ? Check email
+        email = obj.get("customer_email") if isinstance(obj, dict) else getattr(obj, "customer_email", None)
+        if email and email.lower() == self.user.email.lower():
+            return True
+
+        return False
+
+
 class OrderView(GenericCrudView):
     model = Order
     search_fields = ["customer_name", "customer_email", "status", "payment_id"]
     filter_fields = ["customer_email", "status", "payment_status"]
     fetch_links = True
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsOrderOwner]
 
     async def filter_queryset(self, base_query: dict[str, Any], request: Request) -> dict[str, Any]:
-        query = await super().filter_queryset(base_query, request)
-        
-        # ? Force scope to the logged-in user (Zero-Config Ownership)
-        user = getattr(request.state, "user", None)
-        if user:
-             user_link = link_to_existing_document(User, str(user.id))
-             # ? Double-match: find by account link OR by email (for guest recovery)
-             query["$or"] = [
-                 {"user": user_link},
-                 {"customer_email": {"$regex": f"^{re.escape(user.email)}$", "$options": "i"}}
-             ]
-             # ? Clean up top-level email filter if it was passed in URL params
-             query.pop("customer_email", None)
-
-        elif "customer_email" in query and isinstance(query["customer_email"], str):
-            email = query["customer_email"].lower().strip()
-            query["customer_email"] = {"$regex": f"^{re.escape(email)}$", "$options": "i"}
-            
-        return query
+        """Apply generic search and field filters."""
+        return await super().filter_queryset(base_query, request)
 
     async def before_create(self, data: dict[str, Any], user: Any) -> dict[str, Any]:
         """
@@ -336,6 +377,16 @@ class OrderView(GenericCrudView):
         await self._decrement_product_stock_for_order(instance)
         await self._mark_source_cart_as_ordered(instance)
         await self._create_and_link_payment_record(instance)
+
+        # ? Trigger order confirmation email in the background (audited task)
+        if instance.customer_email:
+            from backbone.services.tasks import task_service
+            await task_service.enqueue(
+                "backbone.services.mail.mail_service.send_order_confirmation_email",
+                to_email=instance.customer_email,
+                order=instance,
+            )
+
         return instance
 
     async def _decrement_product_stock_for_order(self, order: Order) -> None:
