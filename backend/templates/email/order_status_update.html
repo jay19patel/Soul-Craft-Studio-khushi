@@ -1,40 +1,92 @@
-{% extends "email/base_email.html" %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #1e293b; max-width: 600px; margin: 0 auto; padding: 0; background: #f8fafc; }
+    .wrapper { background: #ffffff; border-radius: 16px; overflow: hidden; margin: 24px auto; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .header { background: linear-gradient(135deg, #0f172a, #1e3a5f); color: #ffffff; padding: 32px 36px; text-align: center; }
+    .header h1 { margin: 0; font-size: 22px; font-weight: 800; }
+    .header p { margin: 8px 0 0; opacity: 0.7; font-size: 13px; }
+    .content { padding: 32px 36px; }
+    .order-id-badge { display: inline-block; background: #f1f5f9; color: #0f172a; font-family: monospace; font-size: 13px; font-weight: 700; padding: 6px 14px; border-radius: 8px; letter-spacing: 0.5px; margin-bottom: 24px; border: 1px solid #e2e8f0; }
+    .status-block { text-align: center; padding: 24px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; margin: 20px 0 28px; }
+    .status-label { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: #16a34a; margin-bottom: 8px; }
+    .status-value { font-size: 22px; font-weight: 900; color: #15803d; text-transform: uppercase; letter-spacing: 1px; }
 
-{% block content %}
-<div style="padding: 20px; text-align: left;">
-    <h1 style="color: #6366f1; margin-bottom: 20px;">Order Status Update</h1>
-    <p>Hi {{ order.customer_name }},</p>
-    <p>We wanted to let you know that the status of your order <strong>#{{ order.id }}</strong> has been updated to:</p>
-    
-    <div style="text-align: center; margin: 40px 0;">
-        <span style="background: #6366f1; color: #ffffff; padding: 12px 30px; border-radius: 999px; font-weight: 700; font-size: 1.2rem; text-transform: uppercase; letter-spacing: 1px;">
-            {{ order.status }}
-        </span>
+    /* Status-specific colours — applied via inline style in context */
+    .status-block.cancelled { background:#fef2f2; border-color:#fecaca; }
+    .status-block.cancelled .status-label { color:#dc2626; }
+    .status-block.cancelled .status-value { color:#b91c1c; }
+
+    .status-block.shipped { background:#eff6ff; border-color:#bfdbfe; }
+    .status-block.shipped .status-label { color:#2563eb; }
+    .status-block.shipped .status-value { color:#1d4ed8; }
+
+    .status-block.processing { background:#fffbeb; border-color:#fde68a; }
+    .status-block.processing .status-label { color:#d97706; }
+    .status-block.processing .status-value { color:#b45309; }
+
+    .items-summary { border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; margin-bottom: 24px; }
+    .items-summary-header { background: #f8fafc; padding: 10px 16px; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; }
+    .items-summary-row { padding: 10px 16px; font-size: 13px; border-top: 1px solid #f1f5f9; display: flex; justify-content: space-between; }
+    .items-summary-row:first-child { border-top: none; }
+    .cta-button { display: block; text-align: center; background: #1d4ed8; color: #ffffff; font-weight: 800; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; padding: 14px 24px; border-radius: 10px; text-decoration: none; margin-top: 24px; }
+    .footer { text-align: center; font-size: 11px; color: #94a3b8; padding: 20px 36px 28px; background: #f8fafc; border-top: 1px solid #f1f5f9; }
+    .footer a { color: #3b82f6; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="header">
+      <h1>📦 Order Update</h1>
+      <p>Your order status has changed</p>
     </div>
 
-    {% if order.status == 'shipped' %}
-    <p>Your items are on their way! You'll find tracking information in your dashboard soon.</p>
-    {% elif order.status == 'delivered' %}
-    <p>Package delivered! We hope you love your new Soul Craft items. If you have any feedback, we'd love to hear from you.</p>
-    {% endif %}
+    <div class="content">
+      <p>Hi <strong>{{ order.customer_name }}</strong>,</p>
+      <p style="font-size:14px; color:#475569;">
+        Your order has been updated. Here's the latest status:
+      </p>
 
-    <div style="background: #f8fafc; padding: 20px; border-radius: 12px; margin: 30px 0;">
-        <h3 style="margin-top: 0;">Items in this order:</h3>
+      <div>
+        <span style="font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:1.5px; color:#94a3b8;">Order ID</span><br>
+        <span class="order-id-badge">#{{ order_id }}</span>
+      </div>
+
+      <div class="status-block">
+        <div class="status-label">New Status</div>
+        <div class="status-value">{{ new_status }}</div>
+      </div>
+
+      {% if order.items %}
+      <div class="items-summary">
+        <div class="items-summary-header">Items in this order</div>
         {% for item in order.items %}
-        <div style="display: flex; align-items: center; margin-bottom: 15px; border-bottom: 1px solid #e2e8f0; padding-bottom: 10px;">
-            {% if item.image %}
-            <img src="{{ item.image }}" alt="{{ item.name }}" style="width: 60px; height: 60px; object-fit: cover; border-radius: 8px; margin-right: 15px;">
-            {% endif %}
-            <div>
-                <p style="margin: 0; font-weight: 600;">{{ item.name }}</p>
-                <p style="margin: 0; color: #64748b; font-size: 0.9rem;">Quantity: {{ item.quantity }}</p>
-            </div>
+        <div class="items-summary-row">
+          <span style="font-weight:600;">{{ item.name }} × {{ item.quantity }}</span>
+          <span style="font-weight:700; color:#1d4ed8;">₹{{ "%.2f"|format(item.subtotal if item.subtotal else item.price * item.quantity) }}</span>
         </div>
         {% endfor %}
+        <div class="items-summary-row" style="font-weight:800; background:#f8fafc;">
+          <span>Total</span>
+          <span style="color:#1d4ed8;">₹{{ "%.2f"|format(order.total_amount) }}</span>
+        </div>
+      </div>
+      {% endif %}
+
+      <p style="font-size:13px; color:#64748b;">
+        If you have any questions about your order, please reply to this email.
+      </p>
+
+      <a class="cta-button" href="{{ app_url }}/orders/{{ order_id }}">View Order Details →</a>
     </div>
 
-    <p style="margin-bottom: 30px;">Questions? Reply to this email or visit our support page.</p>
-    
-    <a href="{{ site_url }}/dashboard/orders/{{ order.id }}" style="background: #1e293b; color: #ffffff; padding: 12px 24px; border-radius: 8px; text-decoration: none; display: inline-block; font-weight: 600;">Track Your Order</a>
-</div>
-{% endblock %}
+    <div class="footer">
+      &copy; {{ current_year }} {{ site_name }}. All rights reserved.<br>
+      <a href="{{ app_url }}">{{ app_url }}</a>
+    </div>
+  </div>
+</body>
+</html>

@@ -45,8 +45,17 @@ const Navbar = () => {
                   onClick={() => setIsProfileOpen(!isProfileOpen)}
                   className="flex items-center gap-2 py-2 px-4 rounded-full bg-slate-50 hover:bg-orange-50 text-blue-950 transition-all border border-slate-100 group"
                 >
-                  <div className="w-6 h-6 rounded-full bg-orange-100 flex items-center justify-center">
-                    <UserIcon className="w-3.5 h-3.5 text-orange-600" />
+                  <div className="w-6 h-6 rounded-full bg-orange-100 flex items-center justify-center overflow-hidden shrink-0">
+                    {user.profile_image ? (
+                      <img
+                        src={user.profile_image}
+                        alt=""
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <UserIcon className="w-3.5 h-3.5 text-orange-600" />
+                    )}
                   </div>
                   <span className="max-w-[100px] truncate">{user.full_name?.split(' ')[0] || 'User'}</span>
                   <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isProfileOpen ? 'rotate-180' : ''}`} />

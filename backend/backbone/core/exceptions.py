@@ -1,90 +1,99 @@
-from fastapi import HTTPException
-from typing import Any, Dict, Optional
+"""
+* backbone/core/exceptions.py
+? Backbone exception hierarchy and FastAPI exception handler registration.
+"""
 
-class APIException(HTTPException):
-    """
-    Base class for all custom API exceptions.
-    Subclasses should provide `status_code` and `detail` defaults.
-    """
-    status_code: int = 500
-    default_detail: str = "A server error occurred."
-    default_code: str = "error"
+from typing import Any
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+
+# ── Base Exception ─────────────────────────────────────────────────────────
+
+
+class BackboneException(Exception):
+    """Root exception for all Backbone errors."""
 
     def __init__(
         self,
-        detail: Optional[str] = None,
-        headers: Optional[Dict[str, str]] = None,
-        code: Optional[str] = None
-    ):
-        if detail is None:
-            detail = self.default_detail
-        self.code = code or self.default_code
-        super().__init__(status_code=self.status_code, detail=detail, headers=headers)
+        message: str,
+        status_code: int = 500,
+        detail: Any | None = None,
+        error_code: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code
+        self.detail = detail or message
+        self.error_code = error_code or "BACKBONE_ERROR"
 
 
-class ValidationError(APIException):
-    status_code = 400
-    default_detail = "Invalid input."
-    default_code = "invalid"
+# ── Domain Exceptions ──────────────────────────────────────────────────────
 
 
-class ParseError(APIException):
-    status_code = 400
-    default_detail = "Malformed request."
-    default_code = "parse_error"
+class NotFoundException(BackboneException):
+    def __init__(self, message: str = "Resource not found", detail: Any | None = None) -> None:
+        super().__init__(message, status_code=404, detail=detail, error_code="NOT_FOUND")
 
 
-class AuthenticationFailed(APIException):
-    status_code = 401
-    default_detail = "Incorrect authentication credentials."
-    default_code = "authentication_failed"
+class ValidationException(BackboneException):
+    def __init__(self, message: str = "Validation failed", detail: Any | None = None) -> None:
+        super().__init__(message, status_code=422, detail=detail, error_code="VALIDATION_ERROR")
 
 
-class NotAuthenticated(APIException):
-    status_code = 401
-    default_detail = "Authentication credentials were not provided."
-    default_code = "not_authenticated"
+class ConflictException(BackboneException):
+    def __init__(self, message: str = "Resource conflict", detail: Any | None = None) -> None:
+        super().__init__(message, status_code=409, detail=detail, error_code="CONFLICT")
 
 
-class PermissionDenied(APIException):
-    status_code = 403
-    default_detail = "You do not have permission to perform this action."
-    default_code = "permission_denied"
+# ── Auth Exceptions ────────────────────────────────────────────────────────
 
 
-class NotFound(APIException):
-    status_code = 404
-    default_detail = "Not found."
-    default_code = "not_found"
+class AuthenticationException(BackboneException):
+    def __init__(self, message: str = "Authentication failed", detail: Any | None = None) -> None:
+        super().__init__(message, status_code=401, detail=detail, error_code="UNAUTHENTICATED")
 
 
-class MethodNotAllowed(APIException):
-    status_code = 405
-    default_detail = "Method not allowed."
-    default_code = "method_not_allowed"
+class PermissionException(BackboneException):
+    def __init__(self, message: str = "Permission denied", detail: Any | None = None) -> None:
+        super().__init__(message, status_code=403, detail=detail, error_code="PERMISSION_DENIED")
 
 
-class NotAcceptable(APIException):
-    status_code = 406
-    default_detail = "Could not satisfy the request Accept header."
-    default_code = "not_acceptable"
+class EmailNotVerifiedException(BackboneException):
+    def __init__(self, message: str = "Email address not verified") -> None:
+        super().__init__(message, status_code=403, detail=message, error_code="EMAIL_NOT_VERIFIED")
 
 
-class UnsupportedMediaType(APIException):
-    status_code = 415
-    default_detail = "Unsupported media type in request."
-    default_code = "unsupported_media_type"
+# ── Service Exceptions ─────────────────────────────────────────────────────
 
 
-class Throttled(APIException):
-    status_code = 429
-    default_detail = "Request was throttled."
-    default_code = "throttled"
-    
-    def __init__(self, wait: Optional[int] = None, detail: Optional[str] = None, headers: Optional[Dict[str, str]] = None):
-        if detail is None:
-            detail = self.default_detail
-            if wait is not None:
-                detail = f"Request was throttled. Expected available in {wait} seconds."
-        self.wait = wait
-        super().__init__(detail=detail, headers=headers)
+class ServiceException(BackboneException):
+    def __init__(self, message: str = "Internal service error", detail: Any | None = None) -> None:
+        super().__init__(message, status_code=500, detail=detail, error_code="SERVICE_ERROR")
+
+
+class MailDeliveryException(ServiceException):
+    def __init__(self, message: str = "Email delivery failed") -> None:
+        super().__init__(message, detail=message)
+        self.error_code = "MAIL_DELIVERY_FAILED"
+
+
+# ── Handler Registration ───────────────────────────────────────────────────
+
+
+def register_exception_handlers(app: FastAPI) -> None:
+    """
+    Register Backbone exception handlers on the given FastAPI app.
+    Call this inside setup_backbone so callers get structured JSON errors.
+    """
+
+    @app.exception_handler(BackboneException)
+    async def handle_backbone_exception(request: Request, exc: BackboneException) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error_code": exc.error_code,
+                "message": exc.message,
+                "detail": exc.detail,
+            },
+        )

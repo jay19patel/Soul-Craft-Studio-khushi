@@ -5,7 +5,7 @@ import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import Link from 'next/link';
 import { useAuth } from '../../context/AuthContext';
-import { getOrdersByEmail, normalizeOrder } from '../../lib/api';
+import { getOrders, normalizeOrder } from '../../lib/api';
 import { useRouter } from 'next/navigation';
 import { 
   Package, Truck, CheckCircle, Clock, ChevronRight, 
@@ -43,12 +43,11 @@ const MyOrdersPage = () => {
   const [error, setError] = useState(null);
 
   // Define fetch handler
-  const fetchOrders = useCallback(async (targetEmail) => {
-    if (!targetEmail) return;
+  const fetchOrders = useCallback(async (targetEmail = null) => {
     setLoading(true);
     setError(null);
     try {
-      const raw = await getOrdersByEmail(targetEmail);
+      const raw = await getOrders(targetEmail);
       setOrders(raw.map(normalizeOrder));
       setSearched(true);
     } catch (err) {
@@ -61,11 +60,10 @@ const MyOrdersPage = () => {
 
   // Automatically fetch if logged in
   useEffect(() => {
-    if (!authLoading && isAuthenticated && user?.email) {
-      setEmail(user.email);
-      fetchOrders(user.email);
+    if (!authLoading && isAuthenticated) {
+      fetchOrders();
     }
-  }, [authLoading, isAuthenticated, user, fetchOrders]);
+  }, [authLoading, isAuthenticated, fetchOrders]);
 
   const handleManualSearch = (e) => {
     e.preventDefault();

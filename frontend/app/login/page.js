@@ -1,16 +1,16 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { Suspense, useState } from 'react';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import Link from 'next/link';
 import { useAuth } from '../../context/AuthContext';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { LogIn, Mail, Lock, CheckCircle2, AlertCircle } from 'lucide-react';
+import { LogIn, Mail, Lock, AlertCircle } from 'lucide-react';
 import { useGoogleLogin } from '@react-oauth/google';
 
 
-export default function LoginPage() {
+function LoginPageContent() {
   const { login, loginWithGoogle } = useAuth();
   const router = useRouter();
 
@@ -27,8 +27,12 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     try {
-      await login(email, password);
-      router.push(redirectPath);
+      const result = await login(email, password);
+      if (result.success) {
+        router.push(redirectPath);
+      } else {
+        setError(result.error || 'Invalid email or password');
+      }
     } catch (err) {
       setError(err.message || 'Invalid email or password');
     } finally {
@@ -167,5 +171,25 @@ export default function LoginPage() {
 
       <Footer />
     </div>
+  );
+}
+
+function LoginPageLoadingFallback() {
+  return (
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
+      <Navbar />
+      <main className="flex-grow flex items-center justify-center px-4 py-20">
+        <div className="w-full max-w-md h-[480px] rounded-[40px] bg-white border border-slate-100 shadow-xl animate-pulse" />
+      </main>
+      <Footer />
+    </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginPageLoadingFallback />}>
+      <LoginPageContent />
+    </Suspense>
   );
 }

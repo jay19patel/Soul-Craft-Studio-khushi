@@ -1,13 +1,13 @@
 "use client";
 
-import React from 'react';
+import React, { Suspense } from 'react';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import Link from 'next/link';
 import { AlertCircle, ArrowLeft, Mail } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 
-export default function VerifyErrorPage() {
+function VerifyErrorPageContent() {
   const searchParams = useSearchParams();
   const reason = searchParams.get('reason');
 
@@ -72,5 +72,25 @@ export default function VerifyErrorPage() {
 
       <Footer />
     </div>
+  );
+}
+
+function VerifyErrorLoadingFallback() {
+  return (
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
+      <Navbar />
+      <main className="flex-grow flex items-center justify-center px-4 py-20 text-center">
+        <div className="w-full max-w-md h-[420px] rounded-[40px] bg-white border border-slate-100 shadow-xl animate-pulse" />
+      </main>
+      <Footer />
+    </div>
+  );
+}
+
+export default function VerifyErrorPage() {
+  return (
+    <Suspense fallback={<VerifyErrorLoadingFallback />}>
+      <VerifyErrorPageContent />
+    </Suspense>
   );
 }

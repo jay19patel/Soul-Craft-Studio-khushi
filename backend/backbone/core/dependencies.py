@@ -1,69 +1,71 @@
+"""
+* backbone/core/dependencies.py
+? FastAPI dependency functions for authentication / user resolution.
+"""
+
+import logging
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from ..common.utils import TokenManager
-from ..schemas import UserOut
-from .models import User, Session
-from typing import Optional
-from beanie import PydanticObjectId
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
+from backbone.utils.security import TokenManager
 
-async def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
+logger = logging.getLogger("backbone.core.dependencies")
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
+
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
     """
-    Dependency to fetch the current authenticated User Beanie document.
+    Resolve the authenticated User from a Bearer JWT.
+    Validates token type, session activity, and user status.
+    Raises HTTP 401 on any failure.
     """
+    from backbone.domain.models import Session, User
+
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
     if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication credentials were not provided.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise credentials_exception
 
     payload = TokenManager.decode_token(token)
     if not payload or payload.get("type") != "access":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    user_id = payload.get("sub")
-    sid = payload.get("sid")
-    
-    # Audit & Revoke: Validate session is still active
-    try:
-        session = await Session.find_one({"_id": PydanticObjectId(sid), "is_active": True})
-        if not session:
-             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Session revoked or expired",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-    except Exception:
-         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session invalid",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise credentials_exception
 
-    # Fetch User Document
-    user = await User.get(PydanticObjectId(user_id))
+    user_id: str | None = payload.get("sub")
+    session_id: str | None = payload.get("sid")
+    if not user_id or not session_id:
+        raise credentials_exception
+
+    active_session = await Session.get(session_id)
+    if not active_session or not getattr(active_session, "is_active", False):
+        raise credentials_exception
+
+    user = await User.get(user_id, fetch_links=True)
     if not user or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, 
-            detail="User not found or inactive"
-        )
-    
+        raise credentials_exception
+
+    # ? Ensure linked profile image is properly resolved (fetch_links=True can be unreliable)
+    try:
+        await user.fetch_link("profile_image")
+    except Exception:
+        logger.debug("Failed to manually fetch profile_image for user %s", user_id)
+
     return user
 
-async def get_optional_user(token: str = Depends(oauth2_scheme)) -> Optional[UserOut]:
+
+async def get_optional_user(token: str = Depends(oauth2_scheme)):
     """
-    Optional user dependency that doesn't raise if token is missing.
+    Resolve the authenticated User if a valid token is present; return None otherwise.
+    Useful for public endpoints that enrich the response for logged-in users.
     """
+    if not token:
+        return None
     try:
-        if not token:
-            return None
-        user = await get_current_user(token)
-        return UserOut(**user.model_dump(by_alias=True))
-    except Exception:
+        return await get_current_user(token)
+    except HTTPException:
         return None

@@ -5,12 +5,14 @@ import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import Link from 'next/link';
 import { useAuth } from '../../context/AuthContext';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { UserPlus, Mail, Lock, User, CheckCircle2, AlertCircle } from 'lucide-react';
 
 export default function RegisterPage() {
   const { register } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectPath = searchParams.get('redirect') || '/';
 
   const [formData, setFormData] = useState({
     full_name: '',
@@ -40,7 +42,7 @@ export default function RegisterPage() {
         email: formData.email,
         password: formData.password
       });
-      router.push('/');
+      router.push(redirectPath);
     } catch (err) {
       setError(err.message || 'Registration failed');
     } finally {

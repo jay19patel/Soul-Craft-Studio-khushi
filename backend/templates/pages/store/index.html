@@ -1,0 +1,286 @@
+{% extends "pages/base_public.html" %}
+{% block content %}
+<section class="rounded-2xl border border-slate-200/80 bg-white/90 p-6 shadow-sm backdrop-blur md:p-8">
+  <header class="mb-8 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+    <div>
+      <p class="text-xs font-semibold uppercase tracking-wide text-indigo-600">Demo storefront</p>
+      <h1 class="text-2xl font-semibold text-slate-900 md:text-3xl">Catalog</h1>
+      <p class="mt-1 max-w-xl text-sm text-slate-600">
+        Live data from <code class="rounded bg-slate-100 px-1 py-0.5 text-xs">{{ api_base }}/api/shop/products/</code>.
+        Add lines to a guest cart (session id in your browser), then place an order linked to that cart.
+      </p>
+    </div>
+    <div class="text-right text-xs text-slate-500">
+      <div>Cart id: <span id="cart-label" class="font-mono text-slate-800">—</span></div>
+      <div>Session: <span id="session-label" class="font-mono text-slate-800">—</span></div>
+    </div>
+  </header>
+
+  <div id="alert" class="mb-4 hidden rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"></div>
+
+  <div class="grid gap-4 md:grid-cols-[220px_1fr]">
+    <aside class="rounded-xl border border-slate-100 bg-slate-50/80 p-4">
+      <h2 class="text-sm font-semibold text-slate-800">Categories</h2>
+      <ul id="category-list" class="mt-3 space-y-1 text-sm text-slate-700"></ul>
+      <button type="button" id="clear-category"
+        class="mt-4 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">
+        Show all products
+      </button>
+    </aside>
+    <div>
+      <div id="product-grid" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"></div>
+    </div>
+  </div>
+</section>
+
+<section class="mt-8 rounded-2xl border border-slate-200/80 bg-white/90 p-6 shadow-sm backdrop-blur md:p-8">
+  <h2 class="text-lg font-semibold text-slate-900">Checkout</h2>
+  <p class="mt-1 text-sm text-slate-600">Submit only after you have a cart with at least one line.</p>
+  <form id="checkout-form" class="mt-6 grid gap-4 md:grid-cols-2">
+    <label class="text-sm font-medium text-slate-700">Full name
+      <input name="customer_name" required class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+    </label>
+    <label class="text-sm font-medium text-slate-700">Email
+      <input name="customer_email" type="email" required class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+    </label>
+    <label class="text-sm font-medium text-slate-700 md:col-span-2">Shipping address
+      <textarea name="shipping_address" required rows="2" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"></textarea>
+    </label>
+    <label class="text-sm font-medium text-slate-700">City
+      <input name="city" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+    </label>
+    <label class="text-sm font-medium text-slate-700">State
+      <input name="state" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+    </label>
+    <label class="text-sm font-medium text-slate-700">PIN code
+      <input name="pincode" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+    </label>
+    <label class="text-sm font-medium text-slate-700">Phone
+      <input name="customer_phone" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+    </label>
+    <label class="text-sm font-medium text-slate-700">UPI / reference id (optional)
+      <input name="payment_id" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+    </label>
+    <div class="md:col-span-2 flex flex-wrap gap-3">
+      <button type="submit"
+        class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-indigo-500">
+        Place order
+      </button>
+    </div>
+  </form>
+</section>
+
+<script>
+  const API_BASE = {{ api_base | tojson }};
+  const SESSION_STORAGE_KEY = "ecommerce_guest_session_id";
+  const CART_STORAGE_KEY = "ecommerce_active_cart_id";
+  const CART_LINES_KEY = "ecommerce_cart_lines";
+
+  function getCartLines() {
+    try {
+      const raw = sessionStorage.getItem(CART_LINES_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function setCartLines(lines) {
+    sessionStorage.setItem(CART_LINES_KEY, JSON.stringify(lines));
+  }
+
+  function showAlert(message) {
+    const el = document.getElementById("alert");
+    el.textContent = message;
+    el.classList.remove("hidden");
+  }
+
+  function ensureGuestSessionId() {
+    let sessionId = sessionStorage.getItem(SESSION_STORAGE_KEY);
+    if (!sessionId) {
+      sessionId = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now());
+      sessionStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+    }
+    document.getElementById("session-label").textContent = sessionId.slice(0, 12) + "…";
+    return sessionId;
+  }
+
+  function readCartId() {
+    return sessionStorage.getItem(CART_STORAGE_KEY);
+  }
+
+  function writeCartId(id) {
+    sessionStorage.setItem(CART_STORAGE_KEY, id);
+    document.getElementById("cart-label").textContent = id ? id : "—";
+  }
+
+  async function fetchJson(url, options) {
+    const response = await fetch(url, options);
+    const text = await response.text();
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch (_) {
+      data = { detail: text };
+    }
+    if (!response.ok) {
+      const detail = (data && (data.detail || data.message)) || response.statusText;
+      throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    }
+    return data;
+  }
+
+  let activeCategoryId = null;
+
+  async function loadCategories() {
+    const data = await fetchJson(`${API_BASE}/api/shop/categories/?page_size=100`, {});
+    const list = document.getElementById("category-list");
+    list.innerHTML = "";
+    (data.results || []).forEach((category) => {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "w-full rounded-md px-2 py-1 text-left hover:bg-white";
+      button.textContent = category.name;
+      button.addEventListener("click", () => {
+        activeCategoryId = category.id;
+        loadProducts();
+      });
+      item.appendChild(button);
+      list.appendChild(item);
+    });
+  }
+
+  function productCardImageSrc(product) {
+    const att = product.primary_image;
+    if (att && att.file_path) {
+      const path = att.file_path;
+      return path.startsWith("http") ? path : `${API_BASE}${path}`;
+    }
+    if (product.image_url) {
+      const u = product.image_url;
+      return u.startsWith("http") ? u : u.startsWith("/") ? `${API_BASE}${u}` : u;
+    }
+    return null;
+  }
+
+  async function loadProducts() {
+    const params = new URLSearchParams({ page_size: "60" });
+    if (activeCategoryId) {
+      params.set("category_id", activeCategoryId);
+    }
+    const data = await fetchJson(`${API_BASE}/api/shop/products/?${params.toString()}`, {});
+    const grid = document.getElementById("product-grid");
+    grid.innerHTML = "";
+    (data.results || []).forEach((product) => {
+      const card = document.createElement("article");
+      card.className = "flex flex-col rounded-xl border border-slate-100 bg-white p-4 shadow-sm";
+      const imageWrap = document.createElement("div");
+      imageWrap.className = "mb-3 aspect-square w-full overflow-hidden rounded-lg bg-slate-100";
+      const imgSrc = productCardImageSrc(product);
+      if (imgSrc) {
+        const img = document.createElement("img");
+        img.src = imgSrc;
+        img.alt = product.name;
+        img.className = "h-full w-full object-cover";
+        imageWrap.appendChild(img);
+      } else {
+        imageWrap.innerHTML = '<div class="flex h-full items-center justify-center text-xs text-slate-400">No image</div>';
+      }
+      const title = document.createElement("h3");
+      title.className = "text-sm font-semibold text-slate-900";
+      title.textContent = product.name;
+      const price = document.createElement("p");
+      price.className = "mt-1 text-xs text-slate-600";
+      price.textContent = `${product.price} · stock ${product.stock}`;
+      const addButton = document.createElement("button");
+      addButton.type = "button";
+      addButton.className = "mt-3 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800";
+      addButton.textContent = "Add to cart";
+      addButton.addEventListener("click", () => addLineToCart(product.id));
+      card.append(imageWrap, title, price, addButton);
+      grid.appendChild(card);
+    });
+  }
+
+  async function addLineToCart(productId) {
+    const sessionId = ensureGuestSessionId();
+    const existingCartId = readCartId();
+    const lines = getCartLines();
+    const lineIndex = lines.findIndex((line) => line.product === productId);
+    if (lineIndex >= 0) {
+      lines[lineIndex].quantity += 1;
+    } else {
+      lines.push({ product: productId, quantity: 1 });
+    }
+    setCartLines(lines);
+    try {
+      if (existingCartId) {
+        await fetchJson(`${API_BASE}/api/shop/carts/${existingCartId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: lines }),
+        });
+        showAlert("Cart updated.");
+      } else {
+        const created = await fetchJson(`${API_BASE}/api/shop/carts/`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId, items: lines }),
+        });
+        writeCartId(created.id);
+        showAlert("Cart created.");
+      }
+    } catch (error) {
+      showAlert(error.message || String(error));
+    }
+  }
+
+  document.getElementById("clear-category").addEventListener("click", () => {
+    activeCategoryId = null;
+    loadProducts();
+  });
+
+  document.getElementById("checkout-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const cartId = readCartId();
+    if (!cartId) {
+      showAlert("Create a cart by adding a product first.");
+      return;
+    }
+    const form = event.target;
+    const payload = {
+      cart_id: cartId,
+      customer_name: form.customer_name.value,
+      customer_email: form.customer_email.value,
+      shipping_address: form.shipping_address.value,
+      city: form.city.value || null,
+      state: form.state.value || null,
+      pincode: form.pincode.value || null,
+      customer_phone: form.customer_phone.value || null,
+      payment_id: form.payment_id.value || null,
+    };
+    try {
+      const order = await fetchJson(`${API_BASE}/api/shop/orders/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      sessionStorage.removeItem(CART_STORAGE_KEY);
+      sessionStorage.removeItem(CART_LINES_KEY);
+      writeCartId("");
+      setCartLines([]);
+      showAlert(`Order placed successfully. Order id: ${order.id}`);
+    } catch (error) {
+      showAlert(error.message || String(error));
+    }
+  });
+
+  ensureGuestSessionId();
+  writeCartId(readCartId());
+  loadCategories()
+    .then(() => loadProducts())
+    .catch((error) => showAlert(error.message || String(error)));
+</script>
+{% endblock %}

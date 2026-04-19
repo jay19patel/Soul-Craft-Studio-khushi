@@ -3,10 +3,14 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCart } from '../context/CartContext';
+import { useAuth } from '../context/AuthContext';
 import { ShoppingBag, X, Plus, Minus, Trash2 } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 const CartSheet = () => {
+    const router = useRouter();
+    const { isAuthenticated } = useAuth();
     const { 
         cart, 
         isCartOpen, 
@@ -131,13 +135,19 @@ const CartSheet = () => {
                                     <span className="font-black text-blue-950">₹{cartTotal}</span>
                                 </div>
                                 <div className="flex flex-col gap-3">
-                                    <Link 
-                                        href="/checkout"
-                                        onClick={toggleCart}
+                                    <button 
+                                        onClick={() => {
+                                            toggleCart();
+                                            if (isAuthenticated) {
+                                                router.push('/checkout');
+                                            } else {
+                                                router.push('/login?redirect=/checkout');
+                                            }
+                                        }}
                                         className="w-full bg-blue-600 text-white py-4 md:py-5 rounded-full font-black uppercase tracking-widest text-xs md:text-sm shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all active:scale-95 text-center flex items-center justify-center"
                                     >
                                         Checkout Now
-                                    </Link>
+                                    </button>
                                     <p className="text-[10px] text-center text-slate-400 font-black uppercase tracking-widest">
                                         Secure transaction • Free shipping
                                     </p>

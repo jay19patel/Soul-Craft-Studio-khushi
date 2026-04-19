@@ -1,7 +1,9 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { fetchCart, createCart, updateCart } from '../lib/api';
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { createCart, updateCart, fetchActiveCart } from '../lib/api';
+import { useAuth } from './AuthContext';
 
 const CartContext = createContext();
 
@@ -10,8 +12,10 @@ const CartContext = createContext();
  * Handles both old static-JSON shape and new API shape.
  */
 function normaliseCartProduct(product) {
+  const catalogProductId = String(product.id ?? product._id ?? '');
   return {
     ...product,
+    id: catalogProductId,
     // Image: prefer explicit image field, fall back to img (API), then null
     image: product.image || product.img || null,
     // Numeric price for arithmetic: prefer price_value, then parse price string
@@ -23,90 +27,156 @@ function normaliseCartProduct(product) {
   };
 }
 
-import { useAuth } from './AuthContext';
-import { useRouter } from 'next/navigation';
+/** Build a stable catalog product id for PATCH payloads (never use cart-line row id here). */
+function resolveProductIdForCartLine(line) {
+  if (!line) return '';
+  if (line.product_id) return String(line.product_id);
+  const productRef = line.product;
+  if (typeof productRef === 'string') return productRef;
+  if (productRef && typeof productRef === 'object') {
+    const nestedId =
+      productRef.id ??
+      productRef._id ??
+      productRef.$id ??
+      (productRef.$oid != null ? productRef.$oid : '');
+    if (nestedId !== '' && nestedId !== undefined && nestedId !== null) {
+      return String(nestedId);
+    }
+  }
+  return '';
+}
+
+/**
+ * API cart lines → in-memory cart rows keyed by catalog product id (for addToCart / sync).
+ */
+function normalizeCartLinesFromApi(items) {
+  if (!Array.isArray(items)) return [];
+  return items.map((line) => {
+    const productId = resolveProductIdForCartLine(line);
+    const embedded = line.product && typeof line.product === 'object' ? line.product : null;
+    return {
+      id: productId,
+      name: line.name || embedded?.name || 'Item',
+      priceValue: Number(line.price ?? embedded?.price_value ?? 0),
+      price: line.price,
+      image:
+        line.image ||
+        embedded?.primary_image?.file_path ||
+        embedded?.image_url ||
+        embedded?.image ||
+        null,
+      quantity: Number(line.quantity ?? 1),
+    };
+  });
+}
 
 export const CartProvider = ({ children }) => {
   const [cart, setCart] = useState([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
-  const [sessionId, setSessionId] = useState(null);
   const [cartId, setCartId] = useState(null);
   const [isReady, setIsReady] = useState(false);
-  
-  const { isAuthenticated, user } = useAuth();
+
+  // ? Skip the first sync cycle after the cart is loaded from the server so we
+  //   don't immediately PATCH with the same data (which causes the backend to
+  //   delete and re-create all CartItem documents for no reason).
+  const skipNextSyncRef = React.useRef(false);
+
+  const { isAuthenticated, user, loading: authLoading } = useAuth();
   const router = useRouter();
 
-  // 1. Initialise session and load backend cart
+  // 1. Backend cart only after login (JWT). Guests have no server cart.
   useEffect(() => {
     const initCart = async () => {
-      let sid = localStorage.getItem('soulcraft_session_id');
-      if (!sid) {
-        sid = 'sess_' + Math.random().toString(36).substring(2, 15);
-        localStorage.setItem('soulcraft_session_id', sid);
+      if (authLoading) {
+        return;
       }
-      setSessionId(sid);
+
+      if (!isAuthenticated || !user) {
+        setCart([]);
+        setCartId(null);
+        setIsReady(true);
+        return;
+      }
+
+      const userId = user.id || user._id;
+      if (!userId) {
+        setCart([]);
+        setCartId(null);
+        setIsReady(true);
+        return;
+      }
 
       try {
-        const userId = user?.id || user?._id;
-        let activeCart = await fetchActiveCart(userId, sid);
+        let activeCart = await fetchActiveCart();
 
         if (activeCart) {
-          // If we found a cart by session but now we're logged in, link it to user
-          if (isAuthenticated && userId && !activeCart.user_id) {
-            try {
-              activeCart = await updateCart(activeCart.id, { user_id: userId });
-            } catch (err) {
-              console.warn("Could not link session cart to user (already has one?), fetching user cart instead.");
-              activeCart = await fetchActiveCart(userId, null);
-            }
-          }
-          
+          skipNextSyncRef.current = true;
           setCartId(String(activeCart.id || activeCart._id || ''));
-          setCart(activeCart.items || []);
+          setCart(normalizeCartLinesFromApi(activeCart.items));
         } else {
-          // Create new cart
-          const payload = { session_id: sid, items: [], total_amount: 0 };
-          if (isAuthenticated && userId) payload.user_id = userId;
-          
-          const newCart = await createCart(payload);
+          const newCart = await createCart({ items: [], total_amount: 0 });
           setCartId(String(newCart.id || newCart._id || ''));
           setCart([]);
         }
       } catch (err) {
         console.error("Cart initialization failed:", err);
+        setCart([]);
+        setCartId(null);
       } finally {
         setIsReady(true);
       }
     };
 
     initCart();
-  }, [isAuthenticated, user]);
+  }, [isAuthenticated, user, authLoading]);
 
-  // 2. Sync cart to backend on change
+  // 2. Sync cart to backend when logged in and a cart id exists.
+  //    skipNextSyncRef prevents firing immediately after the server load (which
+  //    would delete + recreate every CartItem document with identical data).
   useEffect(() => {
-    if (!isReady || !cartId) return;
-    
-    const totalAmount = cart.reduce(
-        (sum, item) => sum + (item.priceValue ?? item.price ?? 0) * item.quantity,
-        0
-    );
-    
-    // Normalise items for API precisely
-    const payloadItems = cart.map(item => ({
-      product: String(item.product || item.id || item._id || ""),
-      name: item.name,
-      quantity: item.quantity,
-      price: item.priceValue || (typeof item.price === 'string' ? parseFloat(item.price.replace(/[^\d.]/g, '')) : item.price),
-      image: item.image
-    }));
+    if (!isAuthenticated || !isReady || !cartId) return;
 
-    // We don't want to trigger sync on every keystroke if possible, 
-    // but useEffect dependency on [cart] does this. 
-    // For small carts it's fine.
-    updateCart(cartId, { items: payloadItems, total_amount: totalAmount }).catch(err => {
+    if (skipNextSyncRef.current) {
+      skipNextSyncRef.current = false;
+      return;
+    }
+
+    const totalAmount = cart.reduce(
+      (sum, item) => sum + (item.priceValue ?? item.price ?? 0) * item.quantity,
+      0
+    );
+
+    const payloadItems = cart
+      .map((item) => {
+        const productIdFromReference = resolveProductIdForCartLine({
+          product_id: item.product_id,
+          product: item.product,
+        });
+        const catalogProductId =
+          (productIdFromReference && String(productIdFromReference).trim()) ||
+          String(item.id ?? '').trim();
+        if (!catalogProductId) {
+          return null;
+        }
+        return {
+          product: catalogProductId,
+          name: item.name,
+          quantity: item.quantity,
+          price:
+            item.priceValue ??
+            (typeof item.price === 'string'
+              ? parseFloat(String(item.price).replace(/[^\d.]/g, ''))
+              : item.price),
+        };
+      })
+      .filter(Boolean);
+
+    if (cartId) {
+      updateCart(cartId, { items: payloadItems, total_amount: totalAmount }).catch((err) => {
         console.error("Cart sync failed:", err);
-    });
-  }, [cart, isReady, cartId]);
+      });
+    }
+  }, [cart, isReady, cartId, isAuthenticated]);
 
   const addToCart = (product) => {
     if (!isAuthenticated) {
@@ -117,6 +187,10 @@ export const CartProvider = ({ children }) => {
     }
 
     const norm = normaliseCartProduct(product);
+    if (!norm.id) {
+      console.error("Cannot add to cart: product is missing a stable catalog id.");
+      return;
+    }
     setCart((prev) => {
       const existing = prev.find((item) => item.id === norm.id);
       if (existing) {

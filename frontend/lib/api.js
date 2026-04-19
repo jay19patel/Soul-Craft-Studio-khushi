@@ -11,6 +11,48 @@
 export const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api").replace(/\/$/, "");
 export const MEDIA_BASE = API_BASE.includes("/api") ? API_BASE.split("/api")[0] : API_BASE;
 
+/** Matches FastAPI ``app.include_router(shop_router, prefix="/api/shop")``. */
+const SHOP_API_PREFIX = "/shop";
+
+/**
+ * Turn FastAPI ``detail`` (string, object, or validation array) into a readable message.
+ */
+function formatApiErrorDetail(detail) {
+  if (detail == null || detail === "") return "";
+  if (typeof detail === "string") return detail;
+  if (typeof detail === "number" || typeof detail === "boolean") return String(detail);
+  if (Array.isArray(detail)) {
+    return detail
+      .map((entry) => {
+        if (entry == null) return "";
+        if (typeof entry === "string") return entry;
+        if (typeof entry === "object" && entry.msg) return String(entry.msg);
+        try {
+          return JSON.stringify(entry);
+        } catch {
+          return "[unserializable]";
+        }
+      })
+      .filter(Boolean)
+      .join("; ");
+  }
+  if (typeof detail === "object") {
+    if (detail.msg) return String(detail.msg);
+    if (detail.message) return String(detail.message);
+    if (detail.error) return String(detail.error);
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return "Request failed";
+    }
+  }
+  try {
+    return JSON.stringify(detail);
+  } catch {
+    return "Request failed";
+  }
+}
+
 // ── Low-level fetch wrapper ───────────────────────────────────────────────
 
 async function apiFetch(path, options = {}) {
@@ -46,7 +88,11 @@ async function apiFetch(path, options = {}) {
       let errorMessage = `API error ${res.status}`;
       try {
         const body = await res.json();
-        errorMessage = body?.detail || body?.message || errorMessage;
+        const rawDetail =
+          body?.detail ?? body?.message ?? body?.error ?? (typeof body === "object" ? body : null);
+        const formatted = formatApiErrorDetail(rawDetail);
+        errorMessage =
+          (formatted && formatted !== "{}" && formatted !== "null" ? formatted : "") || errorMessage;
       } catch {
         // non-JSON error body — keep default message
       }
@@ -85,7 +131,7 @@ function buildQuery(params = {}) {
  * @returns {Promise<Array>}
  */
 export async function getCategories() {
-  const data = await apiFetch(`/categories/${buildQuery({ page_size: 100 })}`);
+  const data = await apiFetch(`${SHOP_API_PREFIX}/categories/${buildQuery({ page_size: 100 })}`);
   const results = data?.results ?? [];
   return results.map(normalizeCategory);
 }
@@ -107,14 +153,14 @@ export async function getTestimonials() {
  * Fetch a paginated list of products with optional filters.
  */
 export async function getProducts(params = {}) {
-  return apiFetch(`/products/${buildQuery({ page_size: 50, ...params })}`);
+  return apiFetch(`${SHOP_API_PREFIX}/products/${buildQuery({ page_size: 50, ...params })}`);
 }
 
 /**
  * Fetch a single product by its MongoDB ObjectId string.
  */
 export async function getProduct(id) {
-  return apiFetch(`/products/${id}`);
+  return apiFetch(`${SHOP_API_PREFIX}/products/${id}`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -125,7 +171,7 @@ export async function getProduct(id) {
  * Place a new order.
  */
 export async function createOrder(payload) {
-  return apiFetch("/orders/", {
+  return apiFetch(`${SHOP_API_PREFIX}/orders/`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -135,14 +181,14 @@ export async function createOrder(payload) {
  * Fetch a single order by its MongoDB ObjectId string.
  */
 export async function getOrder(id) {
-  return apiFetch(`/orders/${id}`);
+  return apiFetch(`${SHOP_API_PREFIX}/orders/${id}`);
 }
 
 /**
  * Fetch current user's orders (authenticated).
  */
 export async function getMyOrders(params = {}) {
-  const data = await apiFetch(`/orders/${buildQuery({
+  const data = await apiFetch(`${SHOP_API_PREFIX}/orders/${buildQuery({
     page_size: 50,
     sort: "-created_at",
     ...params
@@ -153,14 +199,19 @@ export async function getMyOrders(params = {}) {
 /**
  * Fetch all orders for a customer email (guest checkout lookup).
  */
-export async function getOrdersByEmail(email, params = {}) {
+/**
+ * Fetch orders. If no email is provided, the backend scopes to the current logged-in user.
+ */
+export async function getOrders(email = null, params = {}) {
+  const queryObj = {
+    page_size: 100,
+    sort: "-created_at",
+    ...params,
+  };
+  if (email) queryObj.customer_email = email;
+
   const data = await apiFetch(
-    `/orders/${buildQuery({
-      customer_email: email,
-      page_size: 100,
-      sort: "-created_at",
-      ...params,
-    })}`
+    `${SHOP_API_PREFIX}/orders/${buildQuery(queryObj)}`
   );
   return data?.results ?? [];
 }
@@ -207,12 +258,19 @@ export async function getMe() {
 }
 
 /**
- * Log out (optional—backend usually just clears cookies or frontend drops token).
+ * Log out: invalidate the server session (clears the HTTP-only refresh-token cookie)
+ * then wipe client-side storage.
  */
 export async function logout() {
-  if (typeof window !== "undefined") {
-    localStorage.removeItem("auth_token");
-    localStorage.removeItem("user_data");
+  try {
+    await apiFetch("/auth/logout", { method: "POST" });
+  } catch {
+    // Session may already be expired — still clear local state below.
+  } finally {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("auth_token");
+      localStorage.removeItem("user_data");
+    }
   }
 }
 
@@ -224,7 +282,7 @@ export async function logout() {
  * Fetch all payments for the current user.
  */
 export async function getPayments(params = {}) {
-  const data = await apiFetch(`/payments/${buildQuery({
+  const data = await apiFetch(`${SHOP_API_PREFIX}/payments/${buildQuery({
     page_size: 100,
     sort: "-created_at",
     ...params
@@ -237,37 +295,46 @@ export async function getPayments(params = {}) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function fetchCart(params = {}) {
-  const data = await apiFetch(`/carts/${buildQuery(params)}`);
+  const data = await apiFetch(`${SHOP_API_PREFIX}/carts/${buildQuery(params)}`);
   if (data?.results?.length > 0) {
-    return data.results[0];
+    return normalizeCart(data.results[0]);
   }
   return null;
 }
 
 /**
- * Smart helper to fetch the ONE active (non-ordered) cart for a user or session.
+ * Fetch the current user's open cart (requires authenticated API).
  */
-export async function fetchActiveCart(userId, sessionId) {
-  const params = { is_ordered: false };
-  if (userId) params.user_id = userId;
-  else if (sessionId) params.session_id = sessionId;
-  else return null;
+export async function fetchActiveCart() {
+  return fetchCart();
+}
 
-  return fetchCart(params);
+/**
+ * Upload a payment screenshot to get an Attachment ID.
+ */
+export async function uploadScreenshot(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  return apiFetch(`${SHOP_API_PREFIX}/upload-screenshot`, {
+    method: "POST",
+    body: formData, // apiFetch handles setting Content-Type for FormData
+  });
 }
 
 export async function createCart(payload) {
-  return apiFetch("/carts/", {
+  return apiFetch(`${SHOP_API_PREFIX}/carts/`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
 export async function updateCart(cartId, payload) {
-  return apiFetch(`/carts/${cartId}`, {
+  const data = await apiFetch(`${SHOP_API_PREFIX}/carts/${cartId}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
+  return normalizeCart(data);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -275,28 +342,36 @@ export async function updateCart(cartId, payload) {
 // ════════════════════════════════════════════════════════════════════════════
 
 /**
+ * Shared helper to resolve backend image paths/attachments into full URLs.
+ */
+function resolveImageUrl(val) {
+  if (!val) return null;
+  if (typeof val === "string") {
+    // Prefix relative paths (e.g., /media/...) with MEDIA_BASE
+    return val.startsWith("/") ? `${MEDIA_BASE}${val}` : val;
+  }
+  // Handle Beanie Attachment objects/links if they were serialized as objects
+  const path = val.file_path || val.url || null;
+  if (path && typeof path === "string" && path.startsWith("/")) {
+    return `${MEDIA_BASE}${path}`;
+  }
+  return path;
+}
+
+/**
  * Normalise a raw backend category object.
  */
 export function normalizeCategory(c) {
   if (!c) return null;
 
-  const getImageUrl = (val) => {
-    if (!val) return null;
-    if (typeof val === "string") {
-      if (val.startsWith("/")) return `${MEDIA_BASE}${val}`;
-      return val;
-    }
-    const path = val.file_path || val.url || null;
-    if (path && path.startsWith("/")) {
-      return `${MEDIA_BASE}${path}`;
-    }
-    return path;
-  };
+  const imageUrl = resolveImageUrl(c.image_url) || resolveImageUrl(c.img);
 
   return {
     ...c,
-    img: getImageUrl(c.img),
-    image: getImageUrl(c.img), // alias for consistency
+    id: String(c.id || c._id || ""),
+    img: imageUrl,
+    image: imageUrl,
+    image_url: imageUrl,
   };
 }
 
@@ -306,29 +381,28 @@ export function normalizeCategory(c) {
 export function normalizeProduct(p) {
   if (!p) return null;
 
-  const getImageUrl = (val) => {
-    if (!val) return null;
-    if (typeof val === "string") {
-      if (val.startsWith("/")) return `${MEDIA_BASE}${val}`;
-      return val;
-    }
-    const path = val.file_path || val.url || null;
-    if (path && path.startsWith("/")) {
-      return `${MEDIA_BASE}${path}`;
-    }
-    return path;
-  };
+  const galleryFromAttachments = Array.isArray(p.gallery_images)
+    ? p.gallery_images.map(resolveImageUrl).filter(Boolean)
+    : [];
 
-  const mainImage = getImageUrl(p.img || p.image);
-  
-  // Beanie documents have 'id' (string) or '_id' (PydanticObjectId)
+  const mainImage =
+    resolveImageUrl(p.primary_image) ||
+    resolveImageUrl(p.image_url) ||
+    resolveImageUrl(p.img || p.image);
+
+  const legacyGallery = Array.isArray(p.gallery_image_urls)
+    ? p.gallery_image_urls.map(resolveImageUrl).filter(Boolean)
+    : [];
+
   const productId = String(p.id || p._id || "");
+
+  const mergedGallery = [...galleryFromAttachments, ...legacyGallery].filter(Boolean);
 
   return {
     ...p,
-    id: productId, // Ensure ID is a clean string at the top level
+    id: productId,
     image: mainImage,
-    images: (p.images || []).map(getImageUrl).filter(Boolean),
+    images: mergedGallery.length ? mergedGallery : mainImage ? [mainImage] : [],
     priceValue: p.price_value ?? 0,
     priceDisplay: p.price || `₹${p.price_value ?? 0}`,
   };
@@ -339,12 +413,30 @@ export function normalizeProduct(p) {
  */
 export function normalizeOrder(o) {
   if (!o) return null;
+  const orderId = String(o.id || o._id || "");
   return {
     ...o,
+    id: orderId,
     date: o.created_at ? new Date(o.created_at).toLocaleString("en-IN") : "",
     items: (o.items || []).map((item) => ({
       ...item,
-      image: item.image || null,
+      image: resolveImageUrl(item.image),
+    })),
+  };
+}
+
+/**
+ * Normalise a raw backend cart object.
+ */
+export function normalizeCart(c) {
+  if (!c) return null;
+  return {
+    ...c,
+    id: String(c.id || c._id || ""),
+    items: (c.items || []).map((item) => ({
+      ...item,
+      id: String(item.id || item._id || ""),
+      image: resolveImageUrl(item.image) || (item.product ? (resolveImageUrl(item.product.primary_image) || resolveImageUrl(item.product.image_url)) : null),
     })),
   };
 }

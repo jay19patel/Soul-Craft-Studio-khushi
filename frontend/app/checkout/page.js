@@ -2,20 +2,21 @@
 
 import React, { useState } from 'react';
 import { useCart } from '../../context/CartContext';
+import { useAuth } from '../../context/AuthContext';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import { useRouter } from 'next/navigation';
-import { ChevronLeft, MapPin, CreditCard, ShieldCheck } from 'lucide-react';
+import { ChevronLeft, MapPin, CreditCard, ShieldCheck, Loader2, Image as ImageIcon, X } from 'lucide-react';
 import Link from 'next/link';
-import { createOrder } from '../../lib/api';
+import { createOrder, uploadScreenshot } from '../../lib/api';
 
 const CheckoutPage = () => {
   const { cart, cartTotal, clearCart, cartId } = useCart();
+  const { isAuthenticated, loading: authLoading } = useAuth();
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
   const [step, setStep] = useState('shipping'); // 'shipping' | 'payment'
-
   const [formData, setFormData] = useState({
     fullName: '',
     email: '',
@@ -25,10 +26,39 @@ const CheckoutPage = () => {
     pincode: '',
     state: '',
   });
-
   const [paymentData, setPaymentData] = useState({
     paymentId: '',
   });
+  const [screenshotFile, setScreenshotFile] = useState(null);
+  const [screenshotPreview, setScreenshotPreview] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+
+  // Authentication guard
+  React.useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      router.push('/login?redirect=/checkout');
+    }
+  }, [isAuthenticated, authLoading, router]);
+
+  // Loading state
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col">
+        <Navbar />
+        <main className="flex-grow flex items-center justify-center">
+          <div className="flex flex-col items-center gap-4">
+            <Loader2 className="w-10 h-10 text-blue-600 animate-spin" />
+            <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">Verifying Session...</p>
+          </div>
+        </main>
+        <Footer />
+      </div>
+    );
+  }
+
+  // Not authenticated prevent render
+  if (!isAuthenticated) return null;
+
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -38,6 +68,21 @@ const CheckoutPage = () => {
   const handlePaymentChange = (e) => {
     const { name, value } = e.target;
     setPaymentData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setScreenshotFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => setScreenshotPreview(reader.result);
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const clearScreenshot = () => {
+    setScreenshotFile(null);
+    setScreenshotPreview(null);
   };
 
   const handleProceedToPayment = (e) => {
@@ -71,6 +116,21 @@ const CheckoutPage = () => {
         .filter(Boolean)
         .join(', ');
 
+      let screenshotId = null;
+      if (screenshotFile) {
+        setIsUploading(true);
+        try {
+          const uploadRes = await uploadScreenshot(screenshotFile);
+          screenshotId = uploadRes.id;
+        } catch (err) {
+          console.error("Screenshot upload failed:", err);
+          // We continue anyway, or we could stop? 
+          // User said "Order confirm verification ke bad hoga" so IDs are more important.
+        } finally {
+          setIsUploading(false);
+        }
+      }
+
       const payload = {
         customer_name: formData.fullName,
         customer_email: formData.email,
@@ -82,7 +142,9 @@ const CheckoutPage = () => {
         items: orderItems,
         total_amount: cartTotal,
         payment_id: paymentData.paymentId || null,
-        payment_status: paymentData.paymentId ? 'pending_verification' : 'pending_verification',
+        screenshot_id: screenshotId,
+        // ? Backend ``PaymentStatus``: pending | received | verified | failed
+        payment_status: paymentData.paymentId?.trim() ? 'received' : 'pending',
         notes: null,
         status: 'pending',
         cart_id: cartId || null,
@@ -322,26 +384,41 @@ const CheckoutPage = () => {
                             placeholder="Ex: 123456789012"
                             className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                           />
-                        </div>
-
-                        <div className="flex flex-col gap-2">
-                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">
-                            Upload Screenshot <span className="text-slate-300">(optional)</span>
-                          </label>
-                          <div className="relative group cursor-pointer">
+                                        <div className="relative group cursor-pointer">
                             <input
                               type="file"
                               accept="image/*"
+                              onChange={handleFileChange}
+                              disabled={isUploading}
                               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
                             />
-                            <div className="w-full bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl px-5 py-8 text-center transition-all group-hover:border-blue-400 group-hover:bg-blue-50/30">
-                              <ShieldCheck className="w-8 h-8 text-slate-300 mx-auto mb-2 group-hover:text-blue-500" />
-                              <span className="text-xs font-bold text-slate-400 group-hover:text-blue-600 uppercase tracking-widest">
-                                Select Image
-                              </span>
-                            </div>
+                            {screenshotPreview ? (
+                              <div className="w-full bg-slate-50 border-2 border-dashed border-blue-200 rounded-2xl p-4 flex items-center gap-4">
+                                <div className="w-16 h-16 rounded-lg overflow-hidden border border-slate-200 flex-shrink-0">
+                                  <img src={screenshotPreview} alt="Preview" className="w-full h-full object-cover" />
+                                </div>
+                                <div className="flex-grow flex flex-col items-start gap-1">
+                                  <span className="text-[10px] font-black uppercase tracking-widest text-blue-600">Screenshot Ready</span>
+                                  <span className="text-[10px] text-slate-400 truncate max-w-[150px]">{screenshotFile?.name}</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.preventDefault(); clearScreenshot(); }}
+                                  className="p-2 hover:bg-red-50 text-slate-300 hover:text-red-500 rounded-lg transition-colors z-20"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="w-full bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl px-5 py-8 text-center transition-all group-hover:border-blue-400 group-hover:bg-blue-50/30">
+                                <ShieldCheck className="w-8 h-8 text-slate-300 mx-auto mb-2 group-hover:text-blue-500" />
+                                <span className="text-xs font-bold text-slate-400 group-hover:text-blue-600 uppercase tracking-widest">
+                                  Select Image
+                                </span>
+                              </div>
+                            )}
                           </div>
-                        </div>
+           </div>
                       </div>
                     </div>
 

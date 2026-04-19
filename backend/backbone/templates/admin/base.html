@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Backbone Admin{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body.sidebar-open {
+            overflow: hidden;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 10px;
+        }
+
+        /* Searchable Select Styles */
+        .search-results-dropdown {
+            position: absolute;
+            z-index: 1000;
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 0.75rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            margin-top: 0.5rem;
+            width: 100%;
+            display: none;
+            overflow: hidden;
+        }
+
+        .search-result-item {
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.875rem;
+        }
+
+        .search-result-item:hover {
+            background-color: #f8fafc;
+            color: #4f46e5;
+        }
+
+        .search-result-item.selected {
+            background-color: #eef2ff;
+            color: #4f46e5;
+            font-weight: 600;
+        }
+
+        .data-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            border-radius: 0.75rem;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            background: #f8fafc;
+            color: #334155;
+            border: 1px solid #e2e8f0;
+            transition: all 0.2s;
+        }
+
+        .data-chip:hover {
+            border-color: #cbd5e1;
+            background: #f1f5f9;
+        }
+
+        .chip-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 0.375rem;
+            object-fit: cover;
+            background: #e2e8f0;
+        }
+
+        .sidebar-section[open] .section-chevron {
+            transform: rotate(180deg);
+        }
+
+        @keyframes slideIn {
+            from { transform: translateY(-20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .animate-slide-in {
+            animation: slideIn 0.3s ease-out forwards;
+        }
+    </style>
+</head>
+
+<body class="bg-slate-50 font-sans leading-normal tracking-normal">
+    <div id="sidebarOverlay" class="fixed inset-0 bg-slate-950/50 z-30 hidden md:hidden" onclick="closeSidebar()"></div>
+    <div class="flex flex-col md:flex-row min-h-screen">
+        <!-- Sidebar -->
+        <div id="adminSidebar"
+            class="bg-indigo-900 shadow-xl h-screen w-72 max-w-[85vw] fixed md:sticky top-0 left-0 z-40 -translate-x-full md:translate-x-0 md:w-64 transition-transform duration-300">
+            <div class="px-6 py-8 border-b border-indigo-800/50">
+                <div class="flex items-center justify-between">
+                    <a href="/admin" class="flex items-center space-x-3 text-white">
+                        <div class="bg-indigo-500 p-2 rounded-lg">
+                            <i class="fas fa-layer-group text-lg"></i>
+                        </div>
+                        <span class="text-xl font-bold tracking-tight">Backbone <span
+                                class="text-indigo-300 font-light">Admin</span></span>
+                    </a>
+                    <button type="button" onclick="closeSidebar()" class="md:hidden text-indigo-200 hover:text-white">
+                        <i class="fas fa-times text-lg"></i>
+                    </button>
+                </div>
+
+                <div class="mt-6 relative">
+                    <i
+                        class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-indigo-400 text-xs"></i>
+                    <input type="text" id="sidebarSearch" placeholder="Search models..."
+                        class="w-full bg-indigo-800/50 text-indigo-100 placeholder-indigo-400 border border-indigo-700/50 rounded-lg pl-9 pr-3 py-2 text-sm focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 focus:outline-none transition-all">
+                </div>
+            </div>
+
+            <div class="mt-4 px-4 overflow-y-auto custom-scrollbar h-[calc(100vh-140px)]">
+                <details class="sidebar-section mt-4" data-sidebar-section="core">
+                    <summary class="flex cursor-pointer list-none items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-wider text-indigo-300 hover:bg-indigo-800/60">
+                        <span>Core</span>
+                        <i class="fas fa-chevron-down section-chevron text-[10px] transition-transform duration-200"></i>
+                    </summary>
+                    <nav class="mt-2 space-y-1" data-sidebar-nav>
+                        {% for model in models %}
+                        {% if model.category == 'Core Models' %}
+                        <a href="/admin/{{ model.name }}"
+                            class="flex items-center px-4 py-2 text-indigo-100 hover:bg-indigo-800 rounded-lg transition-colors group">
+                            <i
+                                class="fas fa-cube text-indigo-400 group-hover:text-white mr-3 text-sm transition-colors w-5 text-center"></i>
+                            <span class="font-medium text-sm">{{ model.name }}</span>
+                        </a>
+                        {% endif %}
+                        {% endfor %}
+                        <!-- Config virtual model -->
+                        <a href="/admin/config"
+                            class="flex items-center px-4 py-2 text-indigo-100 hover:bg-indigo-800 rounded-lg transition-colors group">
+                            <i class="fas fa-sliders-h text-indigo-400 group-hover:text-white mr-3 text-sm transition-colors w-5 text-center"></i>
+                            <span class="font-medium text-sm">Config</span>
+                        </a>
+                    </nav>
+                </details>
+
+                <details class="sidebar-section mt-4" data-sidebar-section="application">
+                    <summary class="flex cursor-pointer list-none items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-wider text-indigo-300 hover:bg-indigo-800/60">
+                        <span>Application</span>
+                        <i class="fas fa-chevron-down section-chevron text-[10px] transition-transform duration-200"></i>
+                    </summary>
+                    <nav class="mt-2 space-y-1" data-sidebar-nav>
+                        {% for model in models %}
+                        {% if model.category != 'Core Models' %}
+                        <a href="/admin/{{ model.name }}"
+                            class="flex items-center px-4 py-2 text-indigo-100 hover:bg-indigo-800 rounded-lg transition-colors group">
+                            <i
+                                class="far fa-folder text-indigo-400 group-hover:text-white mr-3 text-sm transition-colors w-5 text-center"></i>
+                            <span class="font-medium text-sm">{{ model.name }}</span>
+                        </a>
+                        {% endif %}
+                        {% endfor %}
+                    </nav>
+                </details>
+
+                {% set registered_pages = admin_site.get_registered_pages() %}
+                {% if registered_pages %}
+                <details class="sidebar-section mt-4" data-sidebar-section="pages">
+                    <summary class="flex cursor-pointer list-none items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-wider text-indigo-300 hover:bg-indigo-800/60">
+                        <span>Pages</span>
+                        <i class="fas fa-chevron-down section-chevron text-[10px] transition-transform duration-200"></i>
+                    </summary>
+                    <nav class="mt-2 space-y-1" data-sidebar-nav>
+                        {% for page in registered_pages %}
+                        <a href="{{ page.path }}"
+                            class="flex items-center px-4 py-2 text-indigo-100 hover:bg-indigo-800 rounded-lg transition-colors group">
+                            <i
+                                class="far fa-window-maximize text-indigo-400 group-hover:text-white mr-3 text-sm transition-colors w-5 text-center"></i>
+                            <span class="font-medium text-sm">{{ page.name }}</span>
+                        </a>
+                        {% endfor %}
+                    </nav>
+                </details>
+                {% endif %}
+
+
+                <div class="mt-8 px-2 opacity-20 hover:opacity-100 transition-opacity">
+                    <p class="text-[10px] font-bold text-indigo-400 uppercase tracking-widest text-center px-4">Backbone
+                        Admin Framework</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="flex-1 flex flex-col min-w-0 bg-slate-50">
+            <!-- Topbar -->
+            <header
+                class="bg-white border-b border-slate-200 min-h-16 flex items-center justify-between px-4 md:px-8 sticky top-0 z-10 gap-4">
+                <div class="flex items-center gap-3 min-w-0">
+                    <button type="button" onclick="openSidebar()"
+                        class="md:hidden h-10 w-10 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 flex items-center justify-center flex-shrink-0">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                    <h1 class="text-lg font-semibold text-slate-800">{% block header %}{% endblock %}</h1>
+                </div>
+                <div class="flex items-center space-x-3 md:space-x-6">
+                    <div class="hidden lg:flex items-center">
+                        {% set avatar_src = (user.profile_image.file_path | default('', true)) if user.profile_image else '' %}
+                        {% if avatar_src %}
+                        <img src="{{ avatar_src }}"
+                            class="h-9 w-9 rounded-xl object-cover border-2 border-indigo-100 mr-3" alt="">
+                        {% else %}
+                        <div
+                            class="h-9 w-9 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center mr-3 border border-indigo-200">
+                            <i class="fas fa-user-shield"></i>
+                        </div>
+                        {% endif %}
+                        <div class="flex flex-col">
+                            <span class="text-sm font-bold text-slate-700 leading-tight">{{ user.full_name or 'Admin
+                                User' }}</span>
+                            <span class="text-[10px] font-bold text-indigo-500 uppercase tracking-wider">{{
+                                (user.role|humanize_label) if user and user.role is not none else 'Admin' }}</span>
+                        </div>
+                    </div>
+
+                    <div class="hidden lg:block h-8 w-px bg-slate-200"></div>
+
+                    <!-- Settings Dropdown -->
+                    <div class="relative" id="settingsMenu">
+                        <button onclick="toggleSettings()"
+                            class="flex items-center space-x-2 text-slate-500 hover:text-indigo-600 transition-colors group px-3 py-2 rounded-xl hover:bg-indigo-50">
+                            <i class="fas fa-cog text-sm group-hover:rotate-45 transition-transform duration-300"></i>
+                            <span class="hidden md:inline text-sm font-bold">Settings</span>
+                            <i class="hidden md:inline fas fa-chevron-down text-xs opacity-60"></i>
+                        </button>
+                        <!-- Dropdown Panel -->
+                        <div id="settingsDropdown"
+                            class="hidden absolute right-0 top-12 w-52 bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden z-50">
+                            <div class="px-4 py-3 border-b border-slate-100 bg-slate-50">
+                                <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Database</p>
+                            </div>
+                            <a href="/admin/export"
+                                class="flex items-center space-x-3 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors">
+                                <span
+                                    class="h-7 w-7 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center text-xs"><i
+                                        class="fas fa-file-export"></i></span>
+                                <span>Export Data</span>
+                            </a>
+                            <a href="/admin/import"
+                                class="flex items-center space-x-3 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-green-50 hover:text-green-700 transition-colors">
+                                <span
+                                    class="h-7 w-7 bg-green-100 text-green-600 rounded-lg flex items-center justify-center text-xs"><i
+                                        class="fas fa-file-import"></i></span>
+                                <span>Import Data</span>
+                            </a>
+                            <div class="border-t border-slate-100"></div>
+                            <a href="/admin/wipe"
+                                class="flex items-center space-x-3 px-4 py-3 text-sm font-semibold text-red-600 hover:bg-red-50 hover:text-red-700 transition-colors">
+                                <span
+                                    class="h-7 w-7 bg-red-100 text-red-600 rounded-lg flex items-center justify-center text-xs"><i
+                                        class="fas fa-trash-alt"></i></span>
+                                <span>Wipe Database</span>
+                            </a>
+                        </div>
+                    </div>
+
+                    <div class="hidden md:block h-8 w-px bg-slate-200"></div>
+
+                    <a href="/admin/logout"
+                        class="flex items-center space-x-2 text-slate-400 hover:text-red-500 transition-colors group">
+                        <div class="p-2 rounded-lg group-hover:bg-red-50 transition-colors">
+                            <i class="fas fa-power-off text-sm"></i>
+                        </div>
+                        <span class="hidden md:inline text-sm font-bold">Logout</span>
+                    </a>
+                </div>
+
+                <!-- Clear DB Confirmation Modal -->
+                <div id="clearModal"
+                    class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center">
+                    <div class="bg-white rounded-3xl shadow-2xl border border-slate-200 p-8 max-w-md w-full mx-4">
+                        <div class="flex items-center space-x-4 mb-6">
+                            <div
+                                class="h-14 w-14 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center text-2xl">
+                                <i class="fas fa-exclamation-triangle"></i>
+                            </div>
+                            <div>
+                                <h3 class="text-xl font-bold text-slate-800">Clear All Data?</h3>
+                                <p class="text-slate-500 text-sm">This action cannot be undone.</p>
+                            </div>
+                        </div>
+                        <p class="text-slate-600 text-sm mb-8 bg-slate-50 rounded-xl p-4 border border-slate-200">
+                            <i class="fas fa-warning text-amber-500 mr-2"></i>
+                            All documents from <strong>every model collection</strong> will be permanently deleted.
+                            Export your data first if you need a backup.
+                        </p>
+                        <div class="flex items-center space-x-3">
+                            <button onclick="closeClear()"
+                                class="flex-1 px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl font-bold transition-colors">
+                                Cancel
+                            </button>
+                            <form action="/admin/clear-database" method="POST" class="flex-1">
+                                <button type="submit"
+                                    class="w-full px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-2xl font-bold transition-colors shadow-lg shadow-red-500/30">
+                                    <i class="fas fa-trash-alt mr-2"></i>Yes, Clear All
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Page Content -->
+            <main class="p-4 md:p-8 flex-1">
+                <!-- Global Alerts (Success/Error) -->
+                {% set error = request.query_params.get('error') %}
+                {% set detail = request.query_params.get('detail') %}
+                {% set success = request.query_params.get('success') %}
+
+                {% if error %}
+                <div class="mb-6 p-4 bg-red-50 border border-red-200 rounded-2xl flex items-start space-x-3 text-red-700 animate-slide-in">
+                    <div class="mt-0.5"><i class="fas fa-exclamation-circle text-lg"></i></div>
+                    <div class="flex-1">
+                        <p class="font-bold text-sm">{{ error|nice_title }}</p>
+                        {% if detail %}
+                        <p class="text-xs mt-1 opacity-90">{{ detail }}</p>
+                        {% endif %}
+                    </div>
+                    <button onclick="this.parentElement.remove()" class="text-red-400 hover:text-red-600 transition-colors">
+                        <i class="fas fa-times text-xs"></i>
+                    </button>
+                </div>
+                {% endif %}
+
+                {% if success %}
+                <div class="mb-6 p-4 bg-green-50 border border-green-200 rounded-2xl flex items-start space-x-3 text-green-700 animate-slide-in">
+                    <div class="mt-0.5"><i class="fas fa-check-circle text-lg"></i></div>
+                    <div class="flex-1 text-sm font-bold">
+                        {{ success|nice_title }}
+                    </div>
+                    <button onclick="this.parentElement.remove()" class="text-green-400 hover:text-green-600 transition-colors">
+                        <i class="fas fa-times text-xs"></i>
+                    </button>
+                </div>
+                {% endif %}
+
+                {% block content %}{% endblock %}
+            </main>
+
+            <footer class="bg-white border-t border-slate-200 py-4 px-4 md:px-8 text-center text-xs text-slate-400">
+                &copy; {{ now.year }} Backbone Framework - Advanced Admin Interface
+            </footer>
+        </div>
+    </div>
+    <script>
+        function openSidebar() {
+            document.getElementById('adminSidebar').classList.remove('-translate-x-full');
+            document.getElementById('sidebarOverlay').classList.remove('hidden');
+            document.body.classList.add('sidebar-open');
+        }
+
+        function closeSidebar() {
+            document.getElementById('adminSidebar').classList.add('-translate-x-full');
+            document.getElementById('sidebarOverlay').classList.add('hidden');
+            document.body.classList.remove('sidebar-open');
+        }
+
+        // ── Settings dropdown ───────────────────────────────────────────────
+        function toggleSettings() {
+            document.getElementById('settingsDropdown').classList.toggle('hidden');
+        }
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function (e) {
+            const menu = document.getElementById('settingsMenu');
+            if (menu && !menu.contains(e.target)) {
+                document.getElementById('settingsDropdown').classList.add('hidden');
+            }
+        });
+
+        // ── Searchable Select Logic ──────────────────────────────────────────
+        window.initSearchableSelect = function (containerId, modelName, fieldName, isMulti = false) {
+            const container = document.getElementById(containerId);
+            const input = container.querySelector('input[type="text"]');
+            const dropdown = container.querySelector('.search-results-dropdown');
+            const resultsList = dropdown.querySelector('.results-list');
+            const prevBtn = dropdown.querySelector('.prev-btn');
+            const nextBtn = dropdown.querySelector('.next-btn');
+            const pageInfo = dropdown.querySelector('.page-info');
+            const clearBtn = container.querySelector('.clear-btn');
+            const chipsContainer = container.querySelector('.chips-container');
+
+            let currentPage = 1;
+            let totalPages = 1;
+            let searchTerm = '';
+            let debounceTimer;
+
+            if (clearBtn && !isMulti) {
+                const hidden = container.querySelector('input[type="hidden"]');
+                if (hidden.value || input.value) clearBtn.style.display = 'block';
+                clearBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    hidden.value = '';
+                    hidden.disabled = false;
+                    input.value = '';
+                    input.focus();
+                    clearBtn.style.display = 'none';
+                    dropdown.style.display = 'none';
+                };
+            }
+
+            function updateDropdown() {
+                const url = `/admin/api/search/${modelName}?q=${encodeURIComponent(searchTerm)}&page=${currentPage}`;
+                resultsList.innerHTML = '<div class="p-4 text-center text-slate-400 text-xs"><i class="fas fa-spinner fa-spin mr-2"></i>Searching...</div>';
+                dropdown.style.display = 'block';
+
+                fetch(url)
+                    .then(res => res.json())
+                    .then(data => {
+                        resultsList.innerHTML = '';
+                        if (data.results.length === 0) {
+                            resultsList.innerHTML = '<div class="p-4 text-center text-slate-400 text-xs">No results found</div>';
+                        } else {
+                            data.results.forEach(item => {
+                                const div = document.createElement('div');
+                                div.className = 'search-result-item flex items-center gap-3';
+
+                                let icon = '<i class="fas fa-link opacity-50"></i>';
+                                if (item.image) {
+                                    icon = `<img src="${item.image}" class="h-8 w-8 rounded-lg object-cover bg-slate-100 border border-slate-200" onerror="this.outerHTML='<i class=\'fas fa-image opacity-50\'></i>'">`;
+                                }
+
+                                div.innerHTML = `
+                                    <div class="flex-shrink-0">${icon}</div>
+                                    <div class="truncate font-medium">${item.text}</div>
+                                `;
+                                div.onclick = () => selectItem(item.id, item.text, item.image);
+                                resultsList.appendChild(div);
+                            });
+                        }
+
+                        currentPage = data.page;
+                        totalPages = data.total_pages;
+                        if (pageInfo) pageInfo.innerText = `Page ${currentPage} of ${totalPages}`;
+                        if (prevBtn) prevBtn.disabled = currentPage <= 1;
+                        if (nextBtn) nextBtn.disabled = currentPage >= totalPages;
+                    })
+                    .catch(err => {
+                        resultsList.innerHTML = '<div class="p-4 text-center text-red-400 text-xs">Error loading data</div>';
+                    });
+            }
+
+            function selectItem(id, label, image = null) {
+                if (isMulti) {
+                    addChip(id, label, image);
+                    input.value = '';
+                    searchTerm = '';
+                } else {
+                    const hidden = container.querySelector('input[type="hidden"]');
+                    hidden.value = id;
+                    hidden.disabled = false;
+                    input.value = label;
+
+                    // ? Handle single-select preview
+                    const existingPreview = container.querySelector('.single-select-preview');
+                    if (existingPreview) existingPreview.remove();
+
+                    if (image) {
+                        const preview = document.createElement('div');
+                        preview.className = 'single-select-preview absolute left-3 top-1/2 -translate-y-1/2 flex items-center';
+                        preview.innerHTML = `<img src="${image}" class="h-7 w-7 rounded-lg object-cover border border-slate-200 bg-white">`;
+                        input.classList.add('pl-12');
+                        container.insertBefore(preview, input);
+                    } else {
+                        input.classList.remove('pl-12');
+                    }
+
+                    if (clearBtn) clearBtn.style.display = 'block';
+                }
+                dropdown.style.display = 'none';
+            }
+
+            function addChip(id, label, image = null) {
+                if (!chipsContainer) return;
+
+                // Check if already exists
+                const existing = chipsContainer.querySelector(`input[value="${id}"]`);
+                if (existing) return;
+
+                const chip = document.createElement('div');
+                chip.className = 'data-chip pr-2 flex items-center gap-2 group';
+
+                let thumb = '<i class="fas fa-link text-[10px] opacity-40 ml-1"></i>';
+                if (image) {
+                    thumb = `<img src="${image}" class="chip-thumb" onerror="this.outerHTML='<i class=\'fas fa-image opacity-40\'></i>'">`;
+                }
+
+                chip.innerHTML = `
+                    ${thumb}
+                    <span class="truncate max-w-[150px]">${label}</span>
+                    <input type="hidden" name="${fieldName}" value="${id}">
+                    <button type="button" class="text-slate-400 hover:text-red-500 transition-colors ml-1">
+                        <i class="fas fa-times-circle"></i>
+                    </button>
+                `;
+                chip.querySelector('button').onclick = () => chip.remove();
+                chipsContainer.appendChild(chip);
+            }
+
+            input.addEventListener('focus', () => {
+                if (!dropdown.style.display || dropdown.style.display === 'none') {
+                    updateDropdown();
+                }
+            });
+
+            input.addEventListener('input', (e) => {
+                searchTerm = e.target.value;
+                currentPage = 1;
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(updateDropdown, 300);
+            });
+
+            if (prevBtn) {
+                prevBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    if (currentPage > 1) {
+                        currentPage--;
+                        updateDropdown();
+                    }
+                };
+            }
+
+            if (nextBtn) {
+                nextBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    if (currentPage < totalPages) {
+                        currentPage++;
+                        updateDropdown();
+                    }
+                };
+            }
+
+            document.addEventListener('click', (e) => {
+                if (!container.contains(e.target)) {
+                    dropdown.style.display = 'none';
+                }
+            });
+        };
+
+        // ── Sidebar search ─────────────────────────────────────────────────
+        document.addEventListener('DOMContentLoaded', function () {
+            const searchInput = document.getElementById('sidebarSearch');
+            if (!searchInput) return;
+
+            const sections = document.querySelectorAll('[data-sidebar-section]');
+            searchInput.addEventListener('input', function (e) {
+                const term = e.target.value.toLowerCase();
+                const navs = document.querySelectorAll('[data-sidebar-nav]');
+
+                navs.forEach(nav => {
+                    const links = nav.querySelectorAll('a');
+                    let hasVisibleLinks = false;
+
+                    links.forEach(link => {
+                        const text = link.querySelector('span').textContent.toLowerCase();
+                        if (text.includes(term)) {
+                            link.classList.remove('hidden');
+                            link.classList.add('flex');
+                            hasVisibleLinks = true;
+                        } else {
+                            link.classList.add('hidden');
+                            link.classList.remove('flex');
+                        }
+                    });
+
+                    const section = nav.closest('[data-sidebar-section]');
+                    if (section) {
+                        if (term && hasVisibleLinks) {
+                            section.open = true;
+                            section.classList.remove('hidden');
+                        } else if (term && !hasVisibleLinks) {
+                            section.open = false;
+                            section.classList.add('hidden');
+                        } else {
+                            section.classList.remove('hidden');
+                            section.open = false;
+                        }
+                    }
+                });
+            });
+
+            sections.forEach(section => {
+                section.open = false;
+            });
+        });
+    </script>
+</body>
+
+</html>

@@ -1,36 +1,84 @@
 [project]
 name = "backbone-fastapi"
-version = "0.1.0"
-description = "Backbone FastAPI — Class-based views, DRF-style permissions, auto-admin for MongoDB."
+version = "3.1.0"
+description = "Backbone FastAPI — Class-based views, DRF-style permissions, auto-admin, background tasks, cron scheduler, and email for MongoDB-backed FastAPI applications."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "argon2-cffi>=25.1.0",
-    "beanie>=2.0.1",
-    "cloudinary>=1.44.1",
-    "email-validator>=2.3.0",
+    # Web framework
     "fastapi>=0.128.0",
-    "google-genai>=1.69.0",
-    "httpx>=0.28.1",
-    "jinja2>=3.1.6",
-    "langchain-community>=0.4.1",
-    "langchain-ollama>=0.2.0",
-    "langchain-google-genai>=4.2.1",
-    "langgraph>=1.1.4",
+    "uvicorn[standard]>=0.30.0",
+    "python-multipart>=0.0.20",
+    # MongoDB / ODM (Beanie 2 + Motor; startup patch in backbone.compat.beanie_motor_aggregate)
+    "beanie>=2.0.1",
     "motor>=3.7.1",
-    "passlib>=1.7.4",
+    # Pydantic & Settings
+    "pydantic>=2.0.0",
     "pydantic-settings>=2.12.0",
+    # Security
+    "argon2-cffi>=25.1.0",
+    "passlib>=1.7.4",
     "pyjwt>=2.11.0",
-    "pytest>=9.0.2",
-    "pytest-asyncio>=1.3.0",
-    "python-multipart>=0.0.22",
-    "python-slugify>=8.0.4",
+    # Email
+    "jinja2>=3.1.6",
+    "email-validator>=2.3.0",
+    # Redis (cache + task queue)
     "redis>=5.0.1",
+    # Slug generation
+    "python-slugify>=8.0.4",
+    # Scheduler
+    "apscheduler>=3.10.4",
+    # CLI
+    "typer[all]>=0.12.0",
+    "rich>=13.7.0",
+    # HTTP client (for testing helpers)
+    "httpx>=0.28.1",
+    # File storage
+    "cloudinary>=1.44.1",
+    # PDF generation
     "reportlab>=4.2.2",
-    "tavily-python>=0.7.23",
-    "uvicorn>=0.40.0",
+    "mongomock-motor>=0.0.36",
+    "pytest-asyncio>=1.3.0",
 ]
 
-# ── Dev server commands ──────────────────────────────────────────────────────
-# New structure (recommended):  uv run uvicorn app.main:app --reload
-# Legacy (backward compat):     uv run uvicorn main:app --reload
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "mongomock-motor>=0.0.21",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+    "pydantic>=2.0.0",
+    "types-PyYAML",
+]
+
+[project.scripts]
+backbone = "backbone.cli.main:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["backbone"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = false
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+
+# ── Dev server ──────────────────────────────────────────────────────────────────
+# uv run uvicorn main:app --reload

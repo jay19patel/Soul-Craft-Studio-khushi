@@ -6,12 +6,14 @@ import Navbar from '../../../components/Navbar';
 import Footer from '../../../components/Footer';
 import Link from 'next/link';
 import { useCart } from '../../../context/CartContext';
+import { useAuth } from '../../../context/AuthContext';
 import { getProduct, getCategories, normalizeProduct } from '../../../lib/api';
 
 const ProductDetailPage = () => {
   const { id } = useParams();
   const router = useRouter();
   const { addToCart } = useCart();
+  const { isAuthenticated } = useAuth();
 
   const [product, setProduct] = useState(null);
   const [categories, setCategories] = useState([]);
@@ -46,7 +48,12 @@ const ProductDetailPage = () => {
   const handleBuyNow = () => {
     if (!product) return;
     addToCart(product);
-    router.push('/checkout');
+    
+    if (!isAuthenticated) {
+      router.push('/login?redirect=/checkout');
+    } else {
+      router.push('/checkout');
+    }
   };
 
   // ── Loading skeleton ─────────────────────────────────────────────────

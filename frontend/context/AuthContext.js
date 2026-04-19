@@ -23,13 +23,27 @@ export function AuthProvider({ children }) {
   const loadingRef = useRef(false);
 
   const loadUser = useCallback(async () => {
-    if (loadingRef.current) return;
-    
+    const tokenSnapshot =
+      typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+
+    if (!tokenSnapshot) {
+      setUser(null);
+      setToken(null);
+      setLoading(false);
+      return;
+    }
+
     loadingRef.current = true;
     setLoading(true);
     setError(null);
     try {
       const userData = await getMe();
+      const tokenAfterRequest =
+        typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+      if (tokenAfterRequest !== tokenSnapshot) {
+        console.warn('Discarding /me result: auth token changed during the request.');
+        return;
+      }
       setUser(userData);
       localStorage.setItem('user_data', JSON.stringify(userData));
       console.log('User loaded successfully:', userData);
@@ -44,11 +58,19 @@ export function AuthProvider({ children }) {
         error.message.includes('API error 401');
 
       if (isAuthError) {
-        console.warn('Authentication session expired or invalid. Clearing session.');
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('user_data');
-        setToken(null);
-        setUser(null);
+        const currentToken =
+          typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+        if (currentToken === tokenSnapshot) {
+          console.warn('Authentication session expired or invalid. Clearing session.');
+          localStorage.removeItem('auth_token');
+          localStorage.removeItem('user_data');
+          setToken(null);
+          setUser(null);
+        } else {
+          console.warn(
+            'Stale /me failure ignored: auth token changed while the request was in flight (e.g. after Google login).',
+          );
+        }
       } else {
         console.error('Failed to load user:', error);
       }
@@ -163,14 +185,8 @@ export function AuthProvider({ children }) {
   };
 
   const setAuthFromToken = useCallback(async (accessToken) => {
-    if (loadingRef.current) {
-      console.log('Already loading, skipping setAuthFromToken');
-      return;
-    }
-
     localStorage.setItem('auth_token', accessToken);
     setToken(accessToken);
-
     await loadUser();
   }, [loadUser]);
 

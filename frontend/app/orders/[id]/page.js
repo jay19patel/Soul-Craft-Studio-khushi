@@ -21,9 +21,10 @@ const STATUS_CONFIG = {
 };
 
 const PAYMENT_STATUS_CONFIG = {
-  pending_verification: { label: 'Pending Verification', color: 'text-orange-600 bg-orange-50 border-orange-100' },
-  verified:             { label: 'Verified',              color: 'text-green-600 bg-green-50 border-green-100' },
-  failed:               { label: 'Failed',                color: 'text-red-500 bg-red-50 border-red-100' },
+  pending: { label: 'Payment pending', color: 'text-slate-600 bg-slate-50 border-slate-100' },
+  received: { label: 'Awaiting verification', color: 'text-orange-600 bg-orange-50 border-orange-100' },
+  verified: { label: 'Verified', color: 'text-green-600 bg-green-50 border-green-100' },
+  failed: { label: 'Failed', color: 'text-red-500 bg-red-50 border-red-100' },
 };
 
 const OrderDetailPage = () => {
@@ -78,7 +79,7 @@ const OrderDetailPage = () => {
 
   const statusCfg = STATUS_CONFIG[order.status?.toLowerCase()] ?? STATUS_CONFIG.pending;
   const StatusIcon = statusCfg.Icon;
-  const paymentCfg = PAYMENT_STATUS_CONFIG[order.payment_status] ?? PAYMENT_STATUS_CONFIG.pending_verification;
+  const paymentCfg = PAYMENT_STATUS_CONFIG[order.payment_status] ?? PAYMENT_STATUS_CONFIG.pending;
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">

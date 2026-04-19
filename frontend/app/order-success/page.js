@@ -104,7 +104,13 @@ const OrderSuccessContent = () => {
           <div className="flex flex-col gap-1">
             <span className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Payment</span>
             <span className="text-[11px] font-bold text-slate-600 uppercase">
-              {order.payment_status === 'verified' ? '✅ Verified' : '🟡 Pending Verification'}
+              {order.payment_status === 'verified'
+                ? '✅ Verified'
+                : order.payment_status === 'failed'
+                  ? '❌ Payment failed'
+                  : order.payment_status === 'received'
+                    ? '🟡 Awaiting verification'
+                    : '🟡 Payment pending'}
             </span>
           </div>
           {order.payment_id && (

@@ -100,6 +100,7 @@ const ShopPage = () => {
         {/* Category Filters */}
         <div className="flex flex-wrap justify-center gap-3 mb-16 px-4">
           <button
+            key="category-all"
             onClick={() => setSelectedCategory('all')}
             className={`px-8 py-3 rounded-full text-sm font-black uppercase tracking-widest transition-all duration-300 ${
               selectedCategory === 'all'

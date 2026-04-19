@@ -1,38 +1,115 @@
-{% extends "email/base_email.html" %}
-
-{% block content %}
-<div style="padding: 20px; text-align: left;">
-    <h1 style="color: #6366f1; margin-bottom: 20px;">Order Confirmed!</h1>
-    <p>Hi {{ order.customer_name }},</p>
-    <p>Thank you for your order! We're getting it ready and will notify you as soon as it's shipped.</p>
-    
-    <div style="background: #f8fafc; padding: 20px; border-radius: 12px; margin: 30px 0;">
-        <h3 style="margin-top: 0;">Order Summary</h3>
-        <p><strong>Order ID:</strong> {{ order.id }}</p>
-        <p><strong>Total Amount:</strong> ₹{{ order.total_amount }}</p>
-        
-        <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
-            <thead>
-                <tr style="border-bottom: 2px solid #e2e8f0;">
-                    <th style="text-align: left; padding: 10px 0;">Item</th>
-                    <th style="text-align: center; padding: 10px 0;">Qty</th>
-                    <th style="text-align: right; padding: 10px 0;">Price</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in order.items %}
-                <tr style="border-bottom: 1px solid #f1f5f9;">
-                    <td style="padding: 10px 0;">{{ item.name }}</td>
-                    <td style="text-align: center; padding: 10px 0;">{{ item.quantity }}</td>
-                    <td style="text-align: right; padding: 10px 0;">₹{{ item.subtotal }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #1e293b; max-width: 600px; margin: 0 auto; padding: 0; background: #f8fafc; }
+    .wrapper { background: #ffffff; border-radius: 16px; overflow: hidden; margin: 24px auto; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .header { background: linear-gradient(135deg, #1d4ed8, #3b82f6); color: #ffffff; padding: 32px 36px; text-align: center; }
+    .header h1 { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: 0.5px; }
+    .header p { margin: 8px 0 0; opacity: 0.85; font-size: 14px; }
+    .content { padding: 32px 36px; }
+    .greeting { font-size: 15px; margin-bottom: 20px; }
+    .order-id-badge { display: inline-block; background: #f1f5f9; color: #0f172a; font-family: monospace; font-size: 13px; font-weight: 700; padding: 6px 14px; border-radius: 8px; letter-spacing: 0.5px; margin-bottom: 24px; border: 1px solid #e2e8f0; }
+    .section-label { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: #94a3b8; margin-bottom: 10px; }
+    .items-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+    .items-table th { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; font-weight: 700; padding: 8px 10px; text-align: left; border-bottom: 2px solid #f1f5f9; }
+    .items-table td { padding: 12px 10px; font-size: 13px; border-bottom: 1px solid #f8fafc; vertical-align: middle; }
+    .items-table tr:last-child td { border-bottom: none; }
+    .item-name { font-weight: 700; color: #0f172a; }
+    .item-qty { color: #64748b; font-size: 12px; }
+    .item-price { font-weight: 700; color: #1d4ed8; text-align: right; }
+    .totals-row { display: flex; justify-content: space-between; padding: 8px 10px; font-size: 13px; }
+    .totals-row.grand-total { border-top: 2px solid #e2e8f0; margin-top: 8px; padding-top: 14px; font-size: 16px; font-weight: 800; color: #0f172a; }
+    .address-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 18px; font-size: 13px; margin-bottom: 24px; }
+    .address-box strong { display: block; color: #0f172a; margin-bottom: 4px; }
+    .status-pill { display: inline-block; background: #fef9c3; color: #854d0e; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; padding: 4px 12px; border-radius: 9999px; border: 1px solid #fde68a; }
+    .note-box { background: #fff7ed; border: 1px solid #fed7aa; border-radius: 10px; padding: 14px 18px; font-size: 12px; color: #9a3412; margin-top: 24px; }
+    .footer { text-align: center; font-size: 11px; color: #94a3b8; padding: 20px 36px 28px; background: #f8fafc; border-top: 1px solid #f1f5f9; }
+    .footer a { color: #3b82f6; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="header">
+      <h1>✅ Order Confirmed!</h1>
+      <p>Thank you for shopping with {{ site_name }}</p>
     </div>
 
-    <p style="margin-bottom: 30px;">You can find your invoice attached to this email.</p>
-    
-    <a href="{{ site_url }}" style="background: #6366f1; color: #ffffff; padding: 12px 24px; border-radius: 8px; text-decoration: none; display: inline-block; font-weight: 600;">Visit Our Store</a>
-</div>
-{% endblock %}
+    <div class="content">
+      <p class="greeting">Hi <strong>{{ order.customer_name }}</strong>,</p>
+      <p style="font-size:14px; color:#475569; margin-bottom:20px;">
+        We've received your order and will start processing it shortly. You'll get another email when your order ships.
+      </p>
+
+      <div class="section-label">Order ID</div>
+      <div class="order-id-badge">#{{ order_id }}</div>
+
+      <div class="section-label">Order Status</div>
+      <div style="margin-bottom:24px;">
+        <span class="status-pill">{{ order.status }}</span>
+      </div>
+
+      {% if order.items %}
+      <div class="section-label">Items Ordered</div>
+      <table class="items-table">
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>Qty</th>
+            <th style="text-align:right;">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in order.items %}
+          <tr>
+            <td class="item-name">{{ item.name }}</td>
+            <td class="item-qty">× {{ item.quantity }}</td>
+            <td class="item-price">₹{{ "%.2f"|format(item.subtotal if item.subtotal else item.price * item.quantity) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div class="totals-row grand-total">
+        <span>Grand Total</span>
+        <span style="color:#1d4ed8;">₹{{ "%.2f"|format(order.total_amount) }}</span>
+      </div>
+      {% endif %}
+
+      <div style="margin-top:28px;">
+        <div class="section-label">Shipping Address</div>
+        <div class="address-box">
+          <strong>{{ order.customer_name }}</strong>
+          {{ order.shipping_address }}
+          {% if order.city or order.state or order.pincode %}
+          <br>{{ [order.city, order.state, order.pincode] | select | join(', ') }}
+          {% endif %}
+          {% if order.customer_phone %}
+          <br>📞 {{ order.customer_phone }}
+          {% endif %}
+        </div>
+      </div>
+
+      {% if order.payment_id %}
+      <div>
+        <div class="section-label">Payment Reference</div>
+        <p style="font-family:monospace; font-size:13px; color:#334155;">{{ order.payment_id }}</p>
+        <p style="font-size:12px; color:#64748b;">Payment will be verified by our team within 1 business day.</p>
+      </div>
+      {% endif %}
+
+      <div class="note-box">
+        <strong>⏳ What happens next?</strong><br>
+        Our team will verify your payment and begin packing your order. You'll receive a status update email at each step.
+      </div>
+    </div>
+
+    <div class="footer">
+      &copy; {{ current_year }} {{ site_name }}. All rights reserved.<br>
+      Questions? Reply to this email or visit
+      <a href="{{ app_url }}">{{ app_url }}</a>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,213 +1,120 @@
-import os
-from datetime import datetime
-from datetime import timezone
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+"""
+* main.py
+? E-commerce application: catalog, carts, checkout, and content APIs built on Backbone.
+"""
 
-from backbone import (
-    BackboneConfig,
-    on_create,
-    on_update,
-    on_delete,
-    on_field_change,
-    log as backbone_log,
-)
-from backbone.core.settings import Settings
+import logging
+from typing import Any
 
-class ProjectSettings(Settings):
-    """
-    Project-specific settings. Inherits all defaults from Backbone core Settings.
-    You can add custom config variables here which will automatically show up 
-    in your Admin "Store" or be used anywhere!
-    """
-    pass
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 
-settings = ProjectSettings()
+from backbone import scheduler, setup_backbone, signals
+from backbone.config import settings
+from backbone.services.mail import mail_service
+from ecommerce import ECOMMERCE_DOCUMENT_MODELS
+from ecommerce.api.content import content_router
+from ecommerce.api.shop import shop_router
+from ecommerce.models import Order, Product
 
-# Schemas
-from schemas.shop import Category, Product, Order, Cart, CartItem, Payment
-from schemas.content import FAQ, Testimonial, Contact
-
-# Routers
-from api.users import router as users_router
-from api.shop import router as shop_router
-from backbone.core.media_router import router as media_router
-from api.content import router as content_router
-from pages.user_guide import router as user_guide_router
-from backbone.auth.pages import router as auth_pages_router
-from pages.admin_pages import (
-    AdminProductListView, 
-    AdminOrderManagementView
-)
+logger = logging.getLogger("ecommerce")
 
 
-# --------------------------------------------------------------------------
-# Application Setup
-# --------------------------------------------------------------------------
-app = FastAPI(title="Soul Craft Studio — Backbone Backend")
-
-# Allowed CORS origins — add production frontend URL here when deploying
-_extra_origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
-ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:3001",
-    *_extra_origins,
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# ── Order lifecycle email hooks ─────────────────────────────────────────────
+# ? These handlers wire into Backbone's signal system (AuditDocument emits them
+#   on every insert/save). No backbone internals are modified.
 
 
-models_to_register = [
-    Category,
-    Product,
-    Order,
-    Cart,
-    CartItem,
-    Payment,
-    FAQ,
-    Testimonial,
-    Contact,
-]
-
-app.include_router(AdminProductListView.as_router("/admin/pages/products", tags=["Admin Pages"]))
-app.include_router(AdminOrderManagementView.as_router("/admin/pages/orders", tags=["Admin Pages"]))
-
-BackboneConfig(
-    app=app,
-    config=settings,
-    document_models=models_to_register,
-)
-
-
-# --------------------------------------------------------------------------
-# Shop Hooks (Order model)
-# --------------------------------------------------------------------------
-def _order_payload(instance: Order) -> dict:
-    return {
-        "id": str(getattr(instance, "id", "") or ""),
-        "customer": getattr(instance, "customer_name", None),
-        "total": getattr(instance, "total_amount", None),
-        "status": getattr(instance, "status", None),
-        "items_count": len(getattr(instance, "items", [])),
-    }
-
-
-@on_create(Order)
-async def order_on_create_hook(instance: Order, **kwargs):
-    backbone_log(
-        "Order placed: on_create",
-        hook="on_create",
-        model="Order",
-        payload=_order_payload(instance),
-    )
-    # Send order confirmation email with PDF invoice
+@signals.post_create.connect(Order)
+async def send_order_confirmation_on_create(instance: Order, **kwargs: Any) -> None:
+    """Send a receipt email immediately after an order is inserted."""
     try:
-        from backbone.email_sender import email_sender
-        from backbone.core.config import BackboneConfig
-        settings = BackboneConfig.get_instance().config
-        
-        # Fetch links to ensure OrderItems are populated
-        await instance.fetch_all_links()
-        
-        context = {
-            "order": instance,
-            "site_name": getattr(settings, "SITE_NAME", "Soul Craft Studio"),
-            "current_year": datetime.now(timezone.utc).year,
-            "site_url": getattr(settings, "SITE_URL", "http://localhost:3000"),
-        }
-        
-        await email_sender.queue_email(
+        await mail_service.send_order_confirmation_email(
             to_email=instance.customer_email,
-            subject=f"Order Confirmation - {str(instance.id)}",
-            template_name="email/order_confirmation.html",
-            context=context,
-            pdf_attachments=[{
-                "template_name": "email/pdf/invoice.html",
-                "context": context,
-                "filename": f"invoice_{str(instance.id)}.pdf",
-                "content_type": "application/pdf",
-            }]
+            order=instance,
         )
-    except Exception as e:
-        backbone_log(f"Failed to send order confirmation: {e}", level="error")
+    except Exception as exc:
+        logger.error(
+            "Order confirmation email failed for order %s: %s", instance.id, exc
+        )
 
 
-@on_update(Order)
-async def order_on_update_hook(instance: Order, changed_fields=None, **kwargs):
-    backbone_log(
-        "Order updated: on_update",
-        hook="on_update",
-        model="Order",
-        payload=_order_payload(instance),
-        changed_fields=list((changed_fields or {}).keys()),
-    )
-
-
-@on_delete(Order)
-async def order_on_delete_hook(instance: Order, **kwargs):
-    backbone_log(
-        "Order deleted: on_delete",
-        hook="on_delete",
-        model="Order",
-        payload=_order_payload(instance),
-    )
-
-
-@on_field_change(Order, fields=["status"])
-async def order_on_status_change_hook(instance: Order, changed_fields=None, matched_fields=None, **kwargs):
-    backbone_log(
-        "Order status changed: on_field_change",
-        hook="on_field_change",
-        model="Order",
-        payload=_order_payload(instance),
-        matched_fields=matched_fields or [],
-        changed_fields=list((changed_fields or {}).keys()),
-    )
-    # Send status update email
+@signals.post_update.connect(Order)
+async def send_status_email_on_order_status_change(
+    instance: Order, changed_fields: dict | None = None, **kwargs: Any
+) -> None:
+    """Send a status-change email only when the ``status`` field actually changed."""
+    if not changed_fields or "status" not in changed_fields:
+        return
+    new_status = str(instance.status)
     try:
-        from backbone.email_sender import email_sender
-        from backbone.core.config import BackboneConfig
-        settings = BackboneConfig.get_instance().config
-        
-        # Fetch links to ensure OrderItems (and snapshots) are available
-        await instance.fetch_all_links()
-        
-        context = {
-            "order": instance,
-            "new_status": instance.status,
-            "site_name": getattr(settings, "SITE_NAME", "Soul Craft Studio"),
-            "current_year": datetime.now(timezone.utc).year,
-            "site_url": getattr(settings, "SITE_URL", "http://localhost:3000"),
-        }
-        
-        await email_sender.queue_email(
+        await mail_service.send_order_status_update_email(
             to_email=instance.customer_email,
-            subject=f"Order Status Updated: {instance.status.upper()}",
-            template_name="email/order_status_update.html",
-            context=context
+            order=instance,
+            new_status=new_status,
         )
-    except Exception as e:
-        backbone_log(f"Failed to send status update email: {e}", level="error")
+    except Exception as exc:
+        logger.error(
+            "Order status update email failed for order %s (→ %s): %s",
+            instance.id,
+            new_status,
+            exc,
+        )
 
 
-# --------------------------------------------------------------------------
-# Register Routers
-# --------------------------------------------------------------------------
-app.include_router(users_router, prefix="/api")
-app.include_router(shop_router, prefix="/api")
-app.include_router(media_router, prefix="/api")
+# ── Scheduled jobs ─────────────────────────────────────────────────────────
+
+
+@scheduler.interval(hours=24)
+async def daily_store_housekeeping_job() -> None:
+    """Placeholder for nightly jobs (e.g. stale guest carts, analytics)."""
+    logger.info("E-commerce: daily housekeeping tick.")
+
+
+# ── FastAPI application ─────────────────────────────────────────────────────
+
+app = FastAPI(
+    title="Backbone E-Commerce Demo",
+    description="Storefront APIs (shop + content) on Backbone + Beanie + MongoDB.",
+    version="1.0.0",
+)
+
+setup_backbone(app, models=[*ECOMMERCE_DOCUMENT_MODELS])
+
+app.include_router(shop_router, prefix="/api/shop")
 app.include_router(content_router, prefix="/api")
-app.include_router(user_guide_router, prefix="/pages")
-app.include_router(auth_pages_router, prefix="/pages")
+
+_storefront_templates = Jinja2Templates(directory=str(settings.user_templates_path))
+
+
+@app.get("/store", response_class=HTMLResponse, tags=["Storefront"])
+async def ecommerce_storefront_page(request: Request) -> HTMLResponse:
+    """HTML catalog + guest cart + checkout; uses JSON under ``/api/shop``."""
+    return _storefront_templates.TemplateResponse(
+        request=request,
+        name="pages/store/index.html",
+        context={
+            "page_name": "Store",
+            "api_base": str(request.base_url).rstrip("/"),
+        },
+    )
 
 
 @app.get("/")
-async def root():
-    return {"message": "Soul Craft Studio (Khushi Website) Backbone Backend"}
+async def root() -> dict[str, object]:
+    return {
+        "status": "online",
+        "app": settings.APP_NAME,
+        "environment": settings.ENVIRONMENT,
+        "docs": "/docs",
+        "admin": f"{settings.ADMIN_PREFIX}/",
+        "user_guide": "/pages/user-guide",
+        "api": {
+            "auth": "/api/auth",
+            "shop": "/api/shop",
+            "content_faqs": "/api/faqs",
+            "content_contact": "/api/content/contact",
+            "storefront": "/store",
+        },
+    }
