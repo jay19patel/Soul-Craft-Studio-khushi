@@ -3,7 +3,6 @@ import "./globals.css";
 import { CartProvider } from "../context/CartContext";
 import { GoogleOAuthProvider } from "@react-oauth/google";
 
-
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],

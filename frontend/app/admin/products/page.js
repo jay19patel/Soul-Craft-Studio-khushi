@@ -62,11 +62,12 @@ export default function AdminProductsPage() {
         slug: product.slug || '',
         description: product.description || '',
         price: product.priceValue || product.price || '',
-        category: product.category || ''
+        category: product.category || '',
+        image: null,
       });
     } else {
       setEditingProduct(null);
-      setFormData({ name: '', slug: '', description: '', price: '', category: '' });
+      setFormData({ name: '', slug: '', description: '', price: '', category: '', image: null });
     }
     setIsModalOpen(true);
   };
@@ -79,19 +80,19 @@ export default function AdminProductsPage() {
   const handleSave = async (e) => {
     e.preventDefault();
     try {
-      const payload = {
-        name: formData.name,
-        slug: formData.slug || formData.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, ''),
-        description: formData.description,
-        price: formData.price
-      };
+      const submitData = new FormData();
+      submitData.append('name', formData.name);
+      submitData.append('slug', formData.slug || formData.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, ''));
+      submitData.append('description', formData.description);
+      submitData.append('price', formData.price);
+      if (formData.image) {
+        submitData.append('image', formData.image);
+      }
 
       if (editingProduct) {
-        await updateAdminProduct(editingProduct.id, payload);
+        await updateAdminProduct(editingProduct.id, submitData);
       } else {
-        // category is required in the backend for creation, let's pass a default or the first one.
-        // For simplicity, we just send the payload and if it fails, the backend will reject it.
-        await createAdminProduct(payload);
+        await createAdminProduct(submitData);
       }
       closeModal();
       fetchProducts();
@@ -276,6 +277,16 @@ export default function AdminProductsPage() {
                   value={formData.description}
                   onChange={(e) => setFormData({...formData, description: e.target.value})}
                   className="w-full bg-slate-50 border-none rounded-xl py-3 px-4 text-sm font-medium text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Product Image</label>
+                <input 
+                  type="file" 
+                  accept="image/*"
+                  onChange={(e) => setFormData({...formData, image: e.target.files[0]})}
+                  className="w-full bg-slate-50 border-none rounded-xl py-3 px-4 text-sm font-medium text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"
                 />
               </div>
 

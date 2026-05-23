@@ -79,7 +79,7 @@ const OrderDetailPage = () => {
 
   const statusCfg = STATUS_CONFIG[order.status?.toLowerCase()] ?? STATUS_CONFIG.pending;
   const StatusIcon = statusCfg.Icon;
-  const paymentCfg = PAYMENT_STATUS_CONFIG[order.payment_status] ?? PAYMENT_STATUS_CONFIG.pending;
+  const paymentCfg = PAYMENT_STATUS_CONFIG[order.payment_status?.toLowerCase()] ?? PAYMENT_STATUS_CONFIG.pending;
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">

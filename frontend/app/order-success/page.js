@@ -104,11 +104,11 @@ const OrderSuccessContent = () => {
           <div className="flex flex-col gap-1">
             <span className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Payment</span>
             <span className="text-[11px] font-bold text-slate-600 uppercase">
-              {order.payment_status === 'verified'
+              {order.payment_status?.toLowerCase() === 'verified'
                 ? '✅ Verified'
-                : order.payment_status === 'failed'
+                : order.payment_status?.toLowerCase() === 'failed'
                   ? '❌ Payment failed'
-                  : order.payment_status === 'received'
+                  : order.payment_status?.toLowerCase() === 'received'
                     ? '🟡 Awaiting verification'
                     : '🟡 Payment pending'}
             </span>
@@ -141,15 +141,15 @@ const OrderSuccessContent = () => {
           </div>
         )}
 
-        <button
-          onClick={() => window.print()}
+        <Link
+          href={`/orders/${order.id}/invoice`}
           className="w-full bg-blue-600 text-white py-4 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all flex items-center justify-center gap-3"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
           </svg>
           Save as PDF
-        </button>
+        </Link>
       </div>
 
       <div className="flex flex-col gap-4 w-full max-w-sm">

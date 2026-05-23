@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     CategoryViewSet, ProductViewSet, CartViewSet, OrderViewSet,
     PaymentViewSet, TestimonialViewSet, AddressViewSet, ContactViewSet,
-    RegisterView, LoginView, MeView, UploadScreenshotView,
+    RegisterView, LoginView, MeView, LogoutView, GoogleLogin, UploadScreenshotView,
     AdminDashboardStatsView, AdminOrderViewSet, AdminProductViewSet,
     ContactMessageViewSet
 )
@@ -30,5 +30,6 @@ urlpatterns = [
     path('auth/register', RegisterView.as_view(), name='register'),
     path('auth/login', LoginView.as_view(), name='login'),
     path('auth/me', MeView.as_view(), name='me'),
-    path('auth/logout', MeView.as_view(), name='logout'), # Mock logout
+    path('auth/logout', LogoutView.as_view(), name='logout'),
+    path('auth/google/', GoogleLogin.as_view(), name='google_login'),
 ]

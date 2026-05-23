@@ -74,14 +74,17 @@ async function apiFetch(path, options = {}) {
     }
   }
 
+  const isFormData = options.body instanceof FormData;
+  const headers = {
+    ...(!isFormData && { "Content-Type": "application/json" }),
+    ...authHeader,
+    ...options.headers,
+  };
+
   try {
     const res = await fetch(url, {
-      headers: { 
-        "Content-Type": "application/json", 
-        ...authHeader,
-        ...options.headers 
-      },
       ...options,
+      headers,
     });
 
     if (!res.ok) {
@@ -243,10 +246,11 @@ export async function login(email, password) {
 /**
  * Handle Google authentication via backend.
  */
-export async function googleLogin(code) {
-  return apiFetch("/auth/google/login", {
+export async function googleLogin(access_token) {
+  // Use dj-rest-auth social login endpoint
+  return apiFetch("/auth/google/", {
     method: "POST",
-    body: JSON.stringify({ code }),
+    body: JSON.stringify({ access_token }),
   });
 }
 
@@ -552,17 +556,19 @@ export async function getAdminProducts() {
 }
 
 export async function createAdminProduct(productData) {
+  const isFormData = productData instanceof FormData;
   return await apiFetch('/admin/products/', {
     method: 'POST',
-    body: JSON.stringify(productData),
+    body: isFormData ? productData : JSON.stringify(productData),
     requireAuth: true,
   });
 }
 
 export async function updateAdminProduct(id, productData) {
+  const isFormData = productData instanceof FormData;
   return await apiFetch(`/admin/products/${id}/`, {
     method: 'PATCH',
-    body: JSON.stringify(productData),
+    body: isFormData ? productData : JSON.stringify(productData),
     requireAuth: true,
   });
 }

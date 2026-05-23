@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { getMe, login as apiLogin, register as apiRegister, googleLogin as apiGoogleLogin, logout as apiLogout } from '../lib/api';
+import { getMe, login as apiLogin, register as apiRegister, logout as apiLogout, googleLogin as apiGoogleLogin } from '../lib/api';
 import { useRouter, usePathname } from 'next/navigation';
 
 const AuthContext = createContext();
@@ -92,9 +92,10 @@ export function AuthProvider({ children }) {
     }
   }, [loadUser]);
 
-  const loginWithGoogle = async (code) => {
+
+  const loginWithGoogle = async (access_token) => {
     try {
-      const response = await apiGoogleLogin(code);
+      const response = await apiGoogleLogin(access_token);
       const accessToken = response.access_token || response.key || response.access;
 
       if (!accessToken) {
@@ -202,7 +203,7 @@ export function AuthProvider({ children }) {
     }
   };
 
-  // Keep googleLogin mapped to loginWithGoogle for backwards compatibility with any existing code calling googleLogin
+
   const value = {
     user,
     token,

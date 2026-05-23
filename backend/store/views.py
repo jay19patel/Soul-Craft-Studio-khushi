@@ -265,6 +265,13 @@ class LoginView(views.APIView):
             })
         return Response({'detail': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
 
+class LogoutView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        # We can just return success, client handles token deletion
+        return Response({'detail': 'Successfully logged out'}, status=status.HTTP_200_OK)
+
 class MeView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
     
@@ -392,10 +399,70 @@ class ContactMessageViewSet(viewsets.ModelViewSet):
             return [permissions.AllowAny()]
         return [permissions.IsAdminUser()]
 
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+
 class AdminProductViewSet(viewsets.ModelViewSet):
     serializer_class = ProductSerializer
     permission_classes = [permissions.IsAdminUser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
     queryset = Product.objects.all().order_by('-created_at')
+
+    def save_image(self, product, file_obj):
+        if file_obj:
+            filename = f"products/{uuid.uuid4().hex}_{file_obj.name}"
+            path = default_storage.save(filename, file_obj)
+            url = default_storage.url(path)
+            
+            # Create or update the primary product image
+            from .models import ProductImage
+            ProductImage.objects.filter(product=product).delete() # Simple replace for now
+            ProductImage.objects.create(product=product, image_url=url, is_primary=True)
+
+    def _get_mutable_data(self, request):
+        if hasattr(request.data, 'dict'):
+            return request.data.dict()
+        return request.data.copy()
+
+    def create(self, request, *args, **kwargs):
+        data = self._get_mutable_data(request)
+        if 'price' in data and 'base_price' not in data:
+            data['base_price'] = data['price']
+            
+        if 'category_id' not in data or not data['category_id']:
+            from .models import Category
+            cat = Category.objects.first()
+            if cat:
+                data['category_id'] = cat.id
+            
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        
+        # Handle Image
+        file_obj = request.FILES.get('image')
+        self.save_image(serializer.instance, file_obj)
+        
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        
+        data = self._get_mutable_data(request)
+        if 'price' in data and 'base_price' not in data:
+            data['base_price'] = data['price']
+            
+        serializer = self.get_serializer(instance, data=data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+
+        # Handle Image
+        file_obj = request.FILES.get('image')
+        if file_obj:
+            self.save_image(instance, file_obj)
+            
+        return Response(serializer.data)
 
 class AdminOrderViewSet(viewsets.ModelViewSet):
     serializer_class = OrderSerializer
@@ -406,3 +473,15 @@ class AdminOrderViewSet(viewsets.ModelViewSet):
         # Override update to handle partial status updates easily
         kwargs['partial'] = True
         return super().update(request, *args, **kwargs)
+
+from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
+from allauth.socialaccount.providers.oauth2.client import OAuth2Client
+from dj_rest_auth.registration.views import SocialLoginView
+
+class GoogleLogin(SocialLoginView):
+    adapter_class = GoogleOAuth2Adapter
+    client_class = OAuth2Client
+    # The callback_url must exactly match the frontend URL used to fetch the code if using auth-code flow.
+    # We are using "postmessage" for the @react-oauth/google standard popup flow.
+    callback_url = "postmessage"
+
