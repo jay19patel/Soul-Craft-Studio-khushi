@@ -26,10 +26,14 @@ load_dotenv(os.path.join(BASE_DIR, '.env'))
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = "django-insecure-!1@joil($ey718_s5462&#!%7n$pe$-!cto0tw$3n68*(x$qnk"
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# ─── Environment ────────────────────────────────────────────────────────────
+ENVIRONMENT = os.getenv('ENVIRONMENT', 'development')
+IS_PRODUCTION = ENVIRONMENT == 'production'
 
-ALLOWED_HOSTS = []
+# SECURITY WARNING: don't run with debug turned on in production!
+DEBUG = not IS_PRODUCTION
+
+ALLOWED_HOSTS = ['*'] if IS_PRODUCTION else []
 
 
 # Application definition
@@ -92,14 +96,20 @@ WSGI_APPLICATION = "ecommerce.wsgi.application"
 
 
 # Database
-# https://docs.djangoproject.com/en/4.2/ref/settings/#databases
+# Development  → SQLite (zero config, local only)
+# Production   → Railway PostgreSQL (from DATABASE_PUBLIC_URL env var)
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+if IS_PRODUCTION:
+    import dj_database_url  # type: ignore[import]
+    _db_url = os.getenv('DATABASE_PUBLIC_URL') or os.getenv('DATABASE_URL')
+    DATABASES = {'default': dj_database_url.config(default=_db_url, conn_max_age=600)}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
     }
-}
 
 
 # Password validation
@@ -200,3 +210,7 @@ EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower() == 'true'
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'Khusi Website <no-reply@khusiwebsite.com>')
+
+# Frontend URL (used in email templates for links)
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+
