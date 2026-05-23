@@ -12,5 +12,6 @@ dependencies = [
     "django-cors-headers>=4.9.0",
     "djangorestframework>=3.17.1",
     "djangorestframework-simplejwt>=5.5.1",
+    "reportlab>=4.5.1",
     "requests>=2.34.2",
 ]
