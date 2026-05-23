@@ -7,7 +7,7 @@ import Footer from '../../../components/Footer';
 import Link from 'next/link';
 import {
   ChevronLeft, Package, Truck, CheckCircle, Clock, X,
-  MapPin, CreditCard, ShieldCheck,
+  MapPin, CreditCard, ShieldCheck, Printer
 } from 'lucide-react';
 import { getOrder, normalizeOrder } from '../../../lib/api';
 
@@ -106,11 +106,21 @@ const OrderDetailPage = () => {
                 ID: {order.id}
               </p>
             </div>
-            <div className={`flex items-center gap-2 px-5 py-3 rounded-full border ${statusCfg.bg}`}>
-              <StatusIcon className={`w-4 h-4 ${statusCfg.color}`} />
-              <span className={`text-[10px] font-black uppercase tracking-widest ${statusCfg.color}`}>
-                {statusCfg.label}
-              </span>
+            <div className="flex items-center gap-3">
+              <div className={`flex items-center gap-2 px-5 py-3 rounded-full border ${statusCfg.bg}`}>
+                <StatusIcon className={`w-4 h-4 ${statusCfg.color}`} />
+                <span className={`text-[10px] font-black uppercase tracking-widest ${statusCfg.color}`}>
+                  {statusCfg.label}
+                </span>
+              </div>
+              <Link
+                href={`/orders/${order.id}/invoice`}
+                target="_blank"
+                className="flex items-center gap-2 px-5 py-3 rounded-full bg-blue-600 text-white shadow-lg shadow-blue-200 hover:bg-blue-700 hover:shadow-xl transition-all active:scale-95"
+              >
+                <Printer className="w-4 h-4" />
+                <span className="text-[10px] font-black uppercase tracking-widest">Download Invoice</span>
+              </Link>
             </div>
           </div>
 
@@ -156,6 +166,88 @@ const OrderDetailPage = () => {
                   <span className="text-xl font-black text-blue-600">
                     ₹{(order.total_amount ?? 0).toLocaleString('en-IN')}
                   </span>
+                </div>
+              </div>
+
+              {/* Order Timeline Tracker */}
+              <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm p-6 md:p-8 flex flex-col gap-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-500">
+                    <Clock className="w-5 h-5" />
+                  </div>
+                  <h2 className="text-xs font-black uppercase tracking-[0.2em] text-blue-950">Order Tracking</h2>
+                </div>
+                
+                <div className="flex flex-col gap-0 pl-4 md:pl-6 relative mt-2">
+                  <div className="absolute left-[31px] md:left-[39px] top-4 bottom-4 w-[2px] bg-slate-100" />
+
+                  {/* 1. Order Placed */}
+                  <div className={`flex items-start gap-6 relative z-10 py-4 ${order.date ? 'opacity-100' : 'opacity-40 grayscale'} ${order.status === 'CANCELLED' ? 'opacity-50 grayscale' : ''}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${order.date && order.status !== 'CANCELLED' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'bg-slate-200 text-slate-400'}`}>
+                      <Package className="w-4 h-4" />
+                    </div>
+                    <div className="flex flex-col gap-1 pt-1">
+                      <p className={`text-sm font-black uppercase tracking-wider ${order.date && order.status !== 'CANCELLED' ? 'text-indigo-950' : 'text-slate-500'}`}>Order Placed</p>
+                      <p className="text-xs font-bold text-slate-400">{order.date || 'Pending'}</p>
+                    </div>
+                  </div>
+
+                  {/* 2. Payment Verified */}
+                  <div className={`flex items-start gap-6 relative z-10 py-4 ${order.payment_verified_date ? 'opacity-100' : 'opacity-40 grayscale'} ${order.status === 'CANCELLED' ? 'opacity-50 grayscale' : ''}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${order.payment_verified_date && order.status !== 'CANCELLED' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-200' : 'bg-slate-200 text-slate-400'}`}>
+                      <ShieldCheck className="w-4 h-4" />
+                    </div>
+                    <div className="flex flex-col gap-1 pt-1">
+                      <p className={`text-sm font-black uppercase tracking-wider ${order.payment_verified_date && order.status !== 'CANCELLED' ? 'text-emerald-950' : 'text-slate-500'}`}>Payment Verified</p>
+                      <p className="text-xs font-bold text-slate-400">{order.payment_verified_date || 'Awaiting verification'}</p>
+                    </div>
+                  </div>
+
+                  {/* 3. Processing */}
+                  <div className={`flex items-start gap-6 relative z-10 py-4 ${order.processing_date ? 'opacity-100' : 'opacity-40 grayscale'} ${order.status === 'CANCELLED' ? 'opacity-50 grayscale' : ''}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${order.processing_date && order.status !== 'CANCELLED' ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'bg-slate-200 text-slate-400'}`}>
+                      <Clock className="w-4 h-4" />
+                    </div>
+                    <div className="flex flex-col gap-1 pt-1">
+                      <p className={`text-sm font-black uppercase tracking-wider ${order.processing_date && order.status !== 'CANCELLED' ? 'text-orange-950' : 'text-slate-500'}`}>Processing</p>
+                      <p className="text-xs font-bold text-slate-400">{order.processing_date || 'Awaiting processing'}</p>
+                    </div>
+                  </div>
+
+                  {/* 4. Shipped */}
+                  <div className={`flex items-start gap-6 relative z-10 py-4 ${order.shipped_date ? 'opacity-100' : 'opacity-40 grayscale'} ${order.status === 'CANCELLED' ? 'hidden' : ''}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${order.shipped_date ? 'bg-blue-500 text-white shadow-lg shadow-blue-200' : 'bg-slate-200 text-slate-400'}`}>
+                      <Truck className="w-4 h-4" />
+                    </div>
+                    <div className="flex flex-col gap-1 pt-1">
+                      <p className={`text-sm font-black uppercase tracking-wider ${order.shipped_date ? 'text-blue-950' : 'text-slate-500'}`}>Shipped</p>
+                      <p className="text-xs font-bold text-slate-400">{order.shipped_date || 'Pending shipment'}</p>
+                    </div>
+                  </div>
+
+                  {/* 5. Delivered */}
+                  <div className={`flex items-start gap-6 relative z-10 py-4 ${order.delivered_date ? 'opacity-100' : 'opacity-40 grayscale'} ${order.status === 'CANCELLED' ? 'hidden' : ''}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${order.delivered_date ? 'bg-green-500 text-white shadow-lg shadow-green-200' : 'bg-slate-200 text-slate-400'}`}>
+                      <CheckCircle className="w-4 h-4" />
+                    </div>
+                    <div className="flex flex-col gap-1 pt-1">
+                      <p className={`text-sm font-black uppercase tracking-wider ${order.delivered_date ? 'text-green-950' : 'text-slate-500'}`}>Delivered</p>
+                      <p className="text-xs font-bold text-slate-400">{order.delivered_date || 'Awaiting delivery'}</p>
+                    </div>
+                  </div>
+
+                  {/* Cancelled State Overlay (if cancelled) */}
+                  {order.status === 'CANCELLED' && (
+                    <div className="flex items-start gap-6 relative z-10 py-4 opacity-100">
+                      <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-red-500 text-white shadow-lg shadow-red-200">
+                        <X className="w-4 h-4" />
+                      </div>
+                      <div className="flex flex-col gap-1 pt-1">
+                        <p className="text-sm font-black uppercase tracking-wider text-red-950">Cancelled</p>
+                        <p className="text-xs font-bold text-slate-400">{order.cancelled_date || 'Order was cancelled'}</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

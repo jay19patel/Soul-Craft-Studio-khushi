@@ -11,8 +11,8 @@
 export const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api").replace(/\/$/, "");
 export const MEDIA_BASE = API_BASE.includes("/api") ? API_BASE.split("/api")[0] : API_BASE;
 
-/** Matches FastAPI ``app.include_router(shop_router, prefix="/api/shop")``. */
-const SHOP_API_PREFIX = "/shop";
+/** Base prefix for shop API routes. Set to empty string for Django integration. */
+const SHOP_API_PREFIX = "";
 
 /**
  * Turn FastAPI ``detail`` (string, object, or validation array) into a readable message.
@@ -258,6 +258,16 @@ export async function getMe() {
 }
 
 /**
+ * Update current logged-in user details.
+ */
+export async function updateProfile(data) {
+  return apiFetch("/auth/me", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+/**
  * Log out: invalidate the server session (clears the HTTP-only refresh-token cookie)
  * then wipe client-side storage.
  */
@@ -330,11 +340,77 @@ export async function createCart(payload) {
 }
 
 export async function updateCart(cartId, payload) {
-  const data = await apiFetch(`${SHOP_API_PREFIX}/carts/${cartId}`, {
+  const data = await apiFetch(`${SHOP_API_PREFIX}/carts/${cartId}/`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
   return normalizeCart(data);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ADDRESSES
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function getAddresses() {
+  const data = await apiFetch(`/addresses/`);
+  return data?.results ?? data ?? [];
+}
+
+export async function addAddress(payload) {
+  return apiFetch(`/addresses/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function setDefaultAddress(id) {
+  return apiFetch(`/addresses/${id}/`, {
+    method: "PATCH",
+    body: JSON.stringify({ is_default: true }),
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONTACTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function getContacts() {
+  const data = await apiFetch(`/contacts/`);
+  return data?.results ?? data ?? [];
+}
+
+export async function addContact(payload) {
+  return apiFetch(`/contacts/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function setDefaultContact(id) {
+  return apiFetch(`/contacts/${id}/`, {
+    method: "PATCH",
+    body: JSON.stringify({ is_default: true }),
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ADMIN DASHBOARD
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function getAdminStats() {
+  return apiFetch(`/admin/stats`);
+}
+
+export async function getAdminOrders() {
+  const data = await apiFetch(`/admin/orders/`);
+  return data?.results ?? data ?? [];
+}
+
+export async function updateAdminOrder(id, payload) {
+  return apiFetch(`/admin/orders/${id}/`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -418,9 +494,15 @@ export function normalizeOrder(o) {
     ...o,
     id: orderId,
     date: o.created_at ? new Date(o.created_at).toLocaleString("en-IN") : "",
+    payment_verified_date: o.payment_verified_at ? new Date(o.payment_verified_at).toLocaleString("en-IN") : null,
+    processing_date: o.processing_at ? new Date(o.processing_at).toLocaleString("en-IN") : null,
+    shipped_date: o.shipped_at ? new Date(o.shipped_at).toLocaleString("en-IN") : null,
+    delivered_date: o.delivered_at ? new Date(o.delivered_at).toLocaleString("en-IN") : null,
+    cancelled_date: o.cancelled_at ? new Date(o.cancelled_at).toLocaleString("en-IN") : null,
     items: (o.items || []).map((item) => ({
       ...item,
-      image: resolveImageUrl(item.image),
+      name: item.product?.name || item.variant?.product?.name || item.name || "Product",
+      image: resolveImageUrl(item.product?.primary_image || item.image || item.variant?.product?.primary_image),
     })),
   };
 }
@@ -433,11 +515,14 @@ export function normalizeCart(c) {
   return {
     ...c,
     id: String(c.id || c._id || ""),
-    items: (c.items || []).map((item) => ({
-      ...item,
-      id: String(item.id || item._id || ""),
-      image: resolveImageUrl(item.image) || (item.product ? (resolveImageUrl(item.product.primary_image) || resolveImageUrl(item.product.image_url)) : null),
-    })),
+    items: (c.items || []).map((item) => {
+      const productImage = item.product?.primary_image || null;
+      return {
+        ...item,
+        id: String(item.id || item._id || ""),
+        image: resolveImageUrl(item.image) || resolveImageUrl(productImage),
+      };
+    }),
   };
 }
 
@@ -454,4 +539,69 @@ export function normalizePayment(p) {
     confirmedAt: formatDate(p.confirmed_at),
     createdAt: formatDate(p.created_at),
   };
+}
+
+// ==========================================
+// ADMIN PRODUCT APIs
+// ==========================================
+
+export async function getAdminProducts() {
+  const data = await apiFetch('/admin/products/', { requireAuth: true });
+  // Handle paginated responses from DRF
+  return data.results ? data.results.map(normalizeProduct) : data.map(normalizeProduct);
+}
+
+export async function createAdminProduct(productData) {
+  return await apiFetch('/admin/products/', {
+    method: 'POST',
+    body: JSON.stringify(productData),
+    requireAuth: true,
+  });
+}
+
+export async function updateAdminProduct(id, productData) {
+  return await apiFetch(`/admin/products/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(productData),
+    requireAuth: true,
+  });
+}
+
+export async function deleteAdminProduct(id) {
+  return await apiFetch(`/admin/products/${id}/`, {
+    method: 'DELETE',
+    requireAuth: true,
+  });
+}
+
+// ==========================================
+// CONTACT MESSAGE APIs
+// ==========================================
+
+export async function submitContactMessage(messageData) {
+  return await apiFetch('/contact-messages/', {
+    method: 'POST',
+    body: JSON.stringify(messageData),
+    requireAuth: false,
+  });
+}
+
+export async function getAdminMessages() {
+  const data = await apiFetch('/contact-messages/', { requireAuth: true });
+  return data.results ? data.results : data;
+}
+
+export async function updateAdminMessage(id, messageData) {
+  return await apiFetch(`/contact-messages/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(messageData),
+    requireAuth: true,
+  });
+}
+
+export async function deleteAdminMessage(id) {
+  return await apiFetch(`/contact-messages/${id}/`, {
+    method: 'DELETE',
+    requireAuth: true,
+  });
 }

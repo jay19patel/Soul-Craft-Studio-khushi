@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { Suspense, useState } from 'react';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import Link from 'next/link';
@@ -8,7 +8,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { UserPlus, Mail, Lock, User, CheckCircle2, AlertCircle } from 'lucide-react';
 
-export default function RegisterPage() {
+function RegisterPageContent() {
   const { register } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -170,5 +170,13 @@ export default function RegisterPage() {
 
       <Footer />
     </div>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <RegisterPageContent />
+    </Suspense>
   );
 }

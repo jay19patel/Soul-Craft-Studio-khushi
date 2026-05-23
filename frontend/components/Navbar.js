@@ -64,6 +64,14 @@ const Navbar = () => {
                 {isProfileOpen && (
                   <div className="absolute top-full right-0 mt-3 w-56 bg-white rounded-3xl shadow-2xl shadow-slate-200/60 border border-slate-100 p-2 flex flex-col gap-1 animate-in zoom-in-95 fade-in duration-200">
                     <Link 
+                      href="/profile" 
+                      onClick={() => setIsProfileOpen(false)}
+                      className="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-slate-50 text-slate-600 hover:text-blue-950 transition-colors"
+                    >
+                      <UserIcon className="w-4 h-4" />
+                      <span className="text-sm font-bold">Profile Settings</span>
+                    </Link>
+                    <Link 
                       href="/orders" 
                       onClick={() => setIsProfileOpen(false)}
                       className="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-slate-50 text-slate-600 hover:text-blue-950 transition-colors"

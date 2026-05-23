@@ -190,11 +190,15 @@ export function AuthProvider({ children }) {
     await loadUser();
   }, [loadUser]);
 
-  const updateProfile = async () => {
+  const updateUserProfile = async (data) => {
     try {
+      const { updateProfile: apiUpdateProfile } = await import('../lib/api');
+      await apiUpdateProfile(data);
       await loadUser();
+      return { success: true };
     } catch (error) {
-      console.error('Failed to reload user after update:', error);
+      console.error('Failed to update user profile:', error);
+      return { success: false, error: error.message };
     }
   };
 
@@ -210,7 +214,7 @@ export function AuthProvider({ children }) {
     register,
     logout,
     setAuthFromToken,
-    updateProfile,
+    updateUserProfile,
     isAuthenticated: !!user,
   };
 

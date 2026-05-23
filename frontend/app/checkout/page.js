@@ -8,11 +8,11 @@ import Footer from '../../components/Footer';
 import { useRouter } from 'next/navigation';
 import { ChevronLeft, MapPin, CreditCard, ShieldCheck, Loader2, Image as ImageIcon, X } from 'lucide-react';
 import Link from 'next/link';
-import { createOrder, uploadScreenshot } from '../../lib/api';
+import { createOrder, uploadScreenshot, getAddresses, getContacts } from '../../lib/api';
 
 const CheckoutPage = () => {
   const { cart, cartTotal, clearCart, cartId } = useCart();
-  const { isAuthenticated, loading: authLoading } = useAuth();
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
@@ -39,6 +39,27 @@ const CheckoutPage = () => {
       router.push('/login?redirect=/checkout');
     }
   }, [isAuthenticated, authLoading, router]);
+
+  // Fetch defaults
+  React.useEffect(() => {
+    if (isAuthenticated) {
+      Promise.all([getAddresses(), getContacts()]).then(([addresses, contacts]) => {
+        const defaultAddr = addresses.find(a => a.is_default) || addresses[0];
+        const defaultContact = contacts.find(c => c.is_default) || contacts[0];
+        
+        setFormData(prev => ({
+          ...prev,
+          fullName: defaultAddr?.full_name || prev.fullName || user?.full_name || '',
+          phone: defaultContact?.phone_number || prev.phone || '',
+          address: defaultAddr?.address_line || prev.address || '',
+          city: defaultAddr?.city || prev.city || '',
+          state: defaultAddr?.state || prev.state || '',
+          pincode: defaultAddr?.pincode || prev.pincode || '',
+          email: user?.email || prev.email || '',
+        }));
+      }).catch(err => console.error("Failed to load defaults", err));
+    }
+  }, [isAuthenticated, user]);
 
   // Loading state
   if (authLoading) {
@@ -337,54 +358,81 @@ const CheckoutPage = () => {
               ) : (
                 /* ── Payment Step ── */
                 <form onSubmit={handleSubmit} className="flex flex-col gap-8">
-                  <div className="bg-white rounded-[32px] p-8 md:p-10 border border-slate-100 shadow-sm flex flex-col gap-8">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center">
-                        <CreditCard className="w-6 h-6" />
+                  <div className="bg-white rounded-[32px] p-8 md:p-10 border border-slate-100 shadow-sm flex flex-col gap-10">
+                    <div className="flex flex-col items-center gap-4 text-center">
+                      <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mb-2">
+                        <CreditCard className="w-8 h-8" />
                       </div>
-                      <h2 className="text-xl font-black uppercase tracking-tight text-blue-950">Scan &amp; Pay</h2>
+                      <h2 className="text-3xl font-[family-name:var(--font-climate-crisis)] uppercase text-blue-950">
+                        Scan &amp; Pay
+                      </h2>
+                      <p className="text-sm font-bold text-slate-500 uppercase tracking-widest max-w-sm">
+                        Please pay <span className="text-blue-600 font-black">₹{cartTotal.toLocaleString('en-IN')}</span> using any UPI app to confirm your order.
+                      </p>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-10 items-center">
-                      {/* QR Code */}
-                      <div className="flex flex-col items-center gap-4 p-6 bg-slate-50 rounded-[32px] border border-slate-100">
-                        <div className="w-full aspect-square bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex items-center justify-center">
+                    <div className="flex flex-col md:flex-row gap-10 items-stretch bg-slate-50 p-6 md:p-8 rounded-[32px] border border-slate-100">
+                      {/* QR Code Section */}
+                      <div className="flex-1 flex flex-col items-center justify-center gap-6">
+                        <div className="w-56 h-56 bg-white rounded-3xl shadow-md border border-slate-200 overflow-hidden flex items-center justify-center p-4 relative group">
                           <img
                             src="/images/qr-dummy.png"
                             alt="Payment QR Code"
-                            className="w-full h-full object-contain p-4"
+                            className="w-full h-full object-contain"
                             onError={(e) => {
                               e.target.style.display = 'none';
                               e.target.nextSibling.style.display = 'flex';
                             }}
                           />
-                          <div className="hidden w-full h-full flex-col items-center justify-center gap-2 text-slate-300">
+                          <div className="hidden w-full h-full flex-col items-center justify-center gap-3 text-slate-300">
                             <svg className="w-16 h-16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
                             </svg>
-                            <span className="text-xs font-bold">QR Code</span>
+                            <span className="text-xs font-bold uppercase tracking-widest">QR Code Missing</span>
                           </div>
                         </div>
-                        <p className="text-[10px] font-black uppercase tracking-widest text-blue-950/60 text-center">
-                          Scan with GPay, PhonePe, or Paytm
-                        </p>
+                        <div className="flex flex-col items-center gap-2">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                            Accepts all UPI Apps
+                          </p>
+                          <div className="flex items-center gap-3 opacity-60 grayscale">
+                            <span className="text-xs font-bold text-slate-600">GPay</span>
+                            <span className="w-1 h-1 rounded-full bg-slate-300" />
+                            <span className="text-xs font-bold text-slate-600">PhonePe</span>
+                            <span className="w-1 h-1 rounded-full bg-slate-300" />
+                            <span className="text-xs font-bold text-slate-600">Paytm</span>
+                          </div>
+                        </div>
                       </div>
 
-                      {/* Input Column */}
-                      <div className="flex flex-col gap-6">
+                      <div className="w-px bg-slate-200 hidden md:block" />
+                      <div className="h-px bg-slate-200 md:hidden w-full" />
+
+                      {/* Input Section */}
+                      <div className="flex-1 flex flex-col justify-center gap-6">
                         <div className="flex flex-col gap-2">
-                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">
-                            UPI / Transaction ID
+                          <label className="text-[10px] font-black uppercase tracking-widest text-blue-950 px-1">
+                            Step 1: Enter UPI / Transaction ID <span className="text-red-500">*</span>
                           </label>
                           <input
                             required
                             name="paymentId"
                             value={paymentData.paymentId}
                             onChange={handlePaymentChange}
-                            placeholder="Ex: 123456789012"
-                            className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                            placeholder="e.g., 123456789012"
+                            className="w-full bg-white border border-slate-200 rounded-2xl px-5 py-4 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:font-normal placeholder:text-slate-400"
                           />
-                                        <div className="relative group cursor-pointer">
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                          <div className="flex items-center justify-between px-1">
+                            <label className="text-[10px] font-black uppercase tracking-widest text-blue-950">
+                              Step 2: Upload Screenshot
+                            </label>
+                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest bg-slate-100 px-2 py-0.5 rounded-full">Optional</span>
+                          </div>
+                          
+                          <div className="relative group cursor-pointer mt-1">
                             <input
                               type="file"
                               accept="image/*"
@@ -393,38 +441,44 @@ const CheckoutPage = () => {
                               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
                             />
                             {screenshotPreview ? (
-                              <div className="w-full bg-slate-50 border-2 border-dashed border-blue-200 rounded-2xl p-4 flex items-center gap-4">
-                                <div className="w-16 h-16 rounded-lg overflow-hidden border border-slate-200 flex-shrink-0">
+                              <div className="w-full bg-white border border-blue-200 rounded-2xl p-3 flex items-center gap-4 shadow-sm shadow-blue-50">
+                                <div className="w-14 h-14 rounded-xl overflow-hidden border border-slate-100 flex-shrink-0">
                                   <img src={screenshotPreview} alt="Preview" className="w-full h-full object-cover" />
                                 </div>
-                                <div className="flex-grow flex flex-col items-start gap-1">
-                                  <span className="text-[10px] font-black uppercase tracking-widest text-blue-600">Screenshot Ready</span>
-                                  <span className="text-[10px] text-slate-400 truncate max-w-[150px]">{screenshotFile?.name}</span>
+                                <div className="flex-grow flex flex-col items-start gap-1 overflow-hidden">
+                                  <span className="text-[10px] font-black uppercase tracking-widest text-blue-600">Screenshot Attached</span>
+                                  <span className="text-[10px] font-medium text-slate-500 truncate w-full">{screenshotFile?.name}</span>
                                 </div>
                                 <button
                                   type="button"
                                   onClick={(e) => { e.preventDefault(); clearScreenshot(); }}
-                                  className="p-2 hover:bg-red-50 text-slate-300 hover:text-red-500 rounded-lg transition-colors z-20"
+                                  className="p-2.5 bg-slate-50 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-xl transition-colors z-20"
                                 >
                                   <X className="w-4 h-4" />
                                 </button>
                               </div>
                             ) : (
-                              <div className="w-full bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl px-5 py-8 text-center transition-all group-hover:border-blue-400 group-hover:bg-blue-50/30">
-                                <ShieldCheck className="w-8 h-8 text-slate-300 mx-auto mb-2 group-hover:text-blue-500" />
-                                <span className="text-xs font-bold text-slate-400 group-hover:text-blue-600 uppercase tracking-widest">
-                                  Select Image
-                                </span>
+                              <div className="w-full bg-white border border-dashed border-slate-300 rounded-2xl px-5 py-6 text-center transition-all group-hover:border-blue-400 group-hover:bg-blue-50 flex flex-col items-center gap-2">
+                                <ImageIcon className="w-6 h-6 text-slate-300 group-hover:text-blue-500 transition-colors" />
+                                <div className="flex flex-col">
+                                  <span className="text-xs font-black text-slate-500 group-hover:text-blue-600 uppercase tracking-widest transition-colors">
+                                    Select Image
+                                  </span>
+                                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                                    For faster verification
+                                  </span>
+                                </div>
                               </div>
                             )}
                           </div>
-           </div>
+                        </div>
                       </div>
                     </div>
 
-                    <div className="bg-orange-50 p-4 rounded-2xl border border-orange-100 text-center">
-                      <p className="text-[10px] font-black text-orange-800 uppercase tracking-widest leading-loose">
-                        Please pay exact amount: ₹{cartTotal.toLocaleString('en-IN')}. Your order will be confirmed after verification.
+                    <div className="bg-orange-50/50 p-5 rounded-2xl border border-orange-100 flex items-center gap-4">
+                      <ShieldCheck className="w-8 h-8 text-orange-500 flex-shrink-0" />
+                      <p className="text-xs font-bold text-orange-900 leading-relaxed">
+                        Your payment will be manually verified by our team. Please ensure you pay the exact amount of <span className="font-black text-orange-600 tracking-wider">₹{cartTotal.toLocaleString('en-IN')}</span> for faster processing.
                       </p>
                     </div>
                   </div>
