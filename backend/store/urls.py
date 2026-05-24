@@ -32,4 +32,7 @@ urlpatterns = [
     path('auth/me', MeView.as_view(), name='me'),
     path('auth/logout', LogoutView.as_view(), name='logout'),
     path('auth/google/', GoogleLogin.as_view(), name='google_login'),
+
+    path("auth/", include("dj_rest_auth.urls")),
+    path("auth/registration/", include("dj_rest_auth.registration.urls")),
 ]
