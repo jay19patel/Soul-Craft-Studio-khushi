@@ -13,7 +13,10 @@ dependencies = [
     "django-cors-headers>=4.9.0",
     "djangorestframework>=3.17.1",
     "djangorestframework-simplejwt>=5.5.1",
+    "gunicorn>=26.0.0",
     "psycopg2-binary>=2.9.12",
+    "python-dotenv>=1.2.2",
     "reportlab>=4.5.1",
     "requests>=2.34.2",
+    "whitenoise>=6.12.0",
 ]
