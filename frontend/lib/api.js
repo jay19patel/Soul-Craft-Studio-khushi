@@ -65,25 +65,27 @@ async function apiFetch(path, options = {}) {
   const cleanPath = path.startsWith("/") ? path : `/${path}`;
   const url = `${API_BASE}${cleanPath}`;
   
+  const { requireAuth = true, ...fetchOptions } = options;
+
   // Get token from localStorage (if in browser)
   let authHeader = {};
   if (typeof window !== "undefined") {
     const token = localStorage.getItem("auth_token");
-    if (token) {
+    if (requireAuth && token) {
       authHeader = { Authorization: `Bearer ${token}` };
     }
   }
 
-  const isFormData = options.body instanceof FormData;
+  const isFormData = fetchOptions.body instanceof FormData;
   const headers = {
     ...(!isFormData && { "Content-Type": "application/json" }),
     ...authHeader,
-    ...options.headers,
+    ...fetchOptions.headers,
   };
 
   try {
     const res = await fetch(url, {
-      ...options,
+      ...fetchOptions,
       headers,
     });
 
@@ -99,7 +101,14 @@ async function apiFetch(path, options = {}) {
       } catch {
         // non-JSON error body — keep default message
       }
-      throw new Error(errorMessage);
+      const error = new Error(errorMessage);
+      error.status = res.status;
+      error.url = url;
+      if (res.status === 401 && typeof window !== "undefined") {
+        localStorage.removeItem("auth_token");
+        localStorage.removeItem("user_data");
+      }
+      throw error;
     }
 
     // 204 No Content
@@ -134,7 +143,9 @@ function buildQuery(params = {}) {
  * @returns {Promise<Array>}
  */
 export async function getCategories() {
-  const data = await apiFetch(`${SHOP_API_PREFIX}/categories/${buildQuery({ page_size: 100 })}`);
+  const data = await apiFetch(`${SHOP_API_PREFIX}/categories/${buildQuery({ page_size: 100 })}`, {
+    requireAuth: false,
+  });
   const results = data?.results ?? [];
   return results.map(normalizeCategory);
 }
@@ -144,7 +155,9 @@ export async function getCategories() {
  * @returns {Promise<Array>}
  */
 export async function getTestimonials() {
-  const data = await apiFetch(`/testimonials/${buildQuery({ page_size: 50 })}`);
+  const data = await apiFetch(`/testimonials/${buildQuery({ page_size: 50 })}`, {
+    requireAuth: false,
+  });
   return data?.results ?? [];
 }
 
@@ -156,14 +169,18 @@ export async function getTestimonials() {
  * Fetch a paginated list of products with optional filters.
  */
 export async function getProducts(params = {}) {
-  return apiFetch(`${SHOP_API_PREFIX}/products/${buildQuery({ page_size: 50, ...params })}`);
+  return apiFetch(`${SHOP_API_PREFIX}/products/${buildQuery({ page_size: 50, ...params })}`, {
+    requireAuth: false,
+  });
 }
 
 /**
  * Fetch a single product by its MongoDB ObjectId string.
  */
 export async function getProduct(id) {
-  return apiFetch(`${SHOP_API_PREFIX}/products/${id}`);
+  return apiFetch(`${SHOP_API_PREFIX}/products/${id}`, {
+    requireAuth: false,
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -171,7 +188,7 @@ export async function getProduct(id) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Place a new order.
+ * Place a new order for the authenticated customer.
  */
 export async function createOrder(payload) {
   return apiFetch(`${SHOP_API_PREFIX}/orders/`, {
@@ -181,7 +198,7 @@ export async function createOrder(payload) {
 }
 
 /**
- * Fetch a single order by its MongoDB ObjectId string.
+ * Fetch one of the authenticated customer's orders.
  */
 export async function getOrder(id) {
   return apiFetch(`${SHOP_API_PREFIX}/orders/${id}`);
@@ -200,10 +217,7 @@ export async function getMyOrders(params = {}) {
 }
 
 /**
- * Fetch all orders for a customer email (guest checkout lookup).
- */
-/**
- * Fetch orders. If no email is provided, the backend scopes to the current logged-in user.
+ * Fetch orders belonging to the authenticated customer.
  */
 export async function getOrders(email = null, params = {}) {
   const queryObj = {
@@ -213,9 +227,7 @@ export async function getOrders(email = null, params = {}) {
   };
   if (email) queryObj.customer_email = email;
 
-  const data = await apiFetch(
-    `${SHOP_API_PREFIX}/orders/${buildQuery(queryObj)}`
-  );
+  const data = await apiFetch(`${SHOP_API_PREFIX}/orders/${buildQuery(queryObj)}`);
   return data?.results ?? [];
 }
 
@@ -230,6 +242,7 @@ export async function register(data) {
   return apiFetch("/auth/register", {
     method: "POST",
     body: JSON.stringify(data),
+    requireAuth: false,
   });
 }
 
@@ -240,6 +253,7 @@ export async function login(email, password) {
   return apiFetch("/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, password }),
+    requireAuth: false,
   });
 }
 
@@ -251,6 +265,7 @@ export async function googleLogin(access_token) {
   return apiFetch("/auth/google/", {
     method: "POST",
     body: JSON.stringify({ access_token }),
+    requireAuth: false,
   });
 }
 
@@ -407,7 +422,12 @@ export async function getAdminStats() {
 
 export async function getAdminOrders() {
   const data = await apiFetch(`/admin/orders/`);
-  return data?.results ?? data ?? [];
+  return (data?.results ?? data ?? []).map(normalizeOrder);
+}
+
+export async function getAdminOrder(id) {
+  const data = await apiFetch(`/admin/orders/${id}/`);
+  return normalizeOrder(data);
 }
 
 export async function updateAdminOrder(id, payload) {
@@ -503,6 +523,7 @@ export function normalizeOrder(o) {
     shipped_date: o.shipped_at ? new Date(o.shipped_at).toLocaleString("en-IN") : null,
     delivered_date: o.delivered_at ? new Date(o.delivered_at).toLocaleString("en-IN") : null,
     cancelled_date: o.cancelled_at ? new Date(o.cancelled_at).toLocaleString("en-IN") : null,
+    screenshot_url: resolveImageUrl(o.screenshot_id),
     items: (o.items || []).map((item) => ({
       ...item,
       name: item.product?.name || item.variant?.product?.name || item.name || "Product",

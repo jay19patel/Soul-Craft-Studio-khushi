@@ -39,8 +39,9 @@ class Order(models.Model):
     total_amount   = models.DecimalField(max_digits=10, decimal_places=2)
 
     # Payment tracking
-    payment_id    = models.CharField(max_length=255, null=True, blank=True)
-    screenshot_id = models.CharField(max_length=255, null=True, blank=True)
+    payment_reference   = models.CharField(max_length=40, unique=True, null=True, blank=True, editable=False)
+    upi_transaction_id  = models.CharField(max_length=255, null=True, blank=True)
+    screenshot_id       = models.CharField(max_length=255, null=True, blank=True)
 
     # Timeline
     created_at         = models.DateTimeField(auto_now_add=True)
@@ -69,6 +70,10 @@ class Order(models.Model):
                     self.payment_verified_at = now
 
         super().save(*args, **kwargs)
+
+        if not self.payment_reference:
+            self.payment_reference = f"PAY-SCS-{self.pk:06d}"
+            Order.objects.filter(pk=self.pk).update(payment_reference=self.payment_reference)
 
     def __str__(self) -> str:
         return f"Order #{self.id} — {self.user.username}"

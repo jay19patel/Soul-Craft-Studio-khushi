@@ -53,7 +53,6 @@ class AdminDashboardStatsView(views.APIView):
 
         total_messages  = ContactMessage.objects.count()
         unread_messages = ContactMessage.objects.filter(is_read=False).count()
-
         return Response({
             'total_products':  total_products,
             'total_orders':    total_orders,

@@ -1,0 +1,72 @@
+services:
+  khusi-website:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000/api
+    image: khusi-website:latest
+    env_file:
+      - ./backend/.env
+    ports:
+      - "3000:3000"
+      - "8000:8000"
+    environment:
+      ENVIRONMENT: development
+      FRONTEND_URL: http://localhost:3000
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api
+      SQLITE_PATH: /app/data/db.sqlite3
+      REDIS_URL: redis://redis:6379/1
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      CACHE_TIMEOUT: 300
+      CACHE_KEY_PREFIX: khusi
+      DJANGO_SUPERUSER_USERNAME: ${DJANGO_SUPERUSER_USERNAME:-admin}
+      DJANGO_SUPERUSER_EMAIL: ${DJANGO_SUPERUSER_EMAIL:-admin@example.com}
+      DJANGO_SUPERUSER_PASSWORD: ${DJANGO_SUPERUSER_PASSWORD:-admin123456}
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - khusi_sqlite:/app/data
+
+  celery-worker:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000/api
+    image: khusi-website:latest
+    env_file:
+      - ./backend/.env
+    working_dir: /app/backend
+    command: ["celery", "-A", "ecommerce", "worker", "--loglevel=info"]
+    environment:
+      ENVIRONMENT: development
+      SQLITE_PATH: /app/data/db.sqlite3
+      FRONTEND_URL: http://localhost:3000
+      REDIS_URL: redis://redis:6379/1
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    depends_on:
+      khusi-website:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    volumes:
+      - khusi_sqlite:/app/data
+
+  redis:
+    image: redis:7.4-alpine
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - khusi_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  khusi_sqlite:
+  khusi_redis:

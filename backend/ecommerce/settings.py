@@ -24,7 +24,7 @@ load_dotenv(os.path.join(BASE_DIR, '.env'))
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-!1@joil($ey718_s5462&#!%7n$pe$-!cto0tw$3n68*(x$qnk"
+SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-!1@joil($ey718_s5462&#!%7n$pe$-!cto0tw$3n68*(x$qnk")
 
 # ─── Environment ────────────────────────────────────────────────────────────
 ENVIRONMENT = os.getenv('ENVIRONMENT', 'development')
@@ -33,7 +33,7 @@ IS_PRODUCTION = ENVIRONMENT == 'production'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = not IS_PRODUCTION
 
-ALLOWED_HOSTS = ['*'] if IS_PRODUCTION else []
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
 
 
 # Application definition
@@ -108,7 +108,7 @@ else:
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
+            'NAME': os.getenv('SQLITE_PATH', BASE_DIR / 'db.sqlite3'),
         }
     }
 
@@ -148,6 +148,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 import os
 MEDIA_URL = '/media/'
@@ -157,6 +158,32 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Cache Settings
+REDIS_URL = os.getenv("REDIS_URL")
+CACHE_TIMEOUT = int(os.getenv("CACHE_TIMEOUT", "300"))
+
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": REDIS_URL,
+            "TIMEOUT": CACHE_TIMEOUT,
+            "KEY_PREFIX": os.getenv("CACHE_KEY_PREFIX", "khusi"),
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+                "IGNORE_EXCEPTIONS": os.getenv("CACHE_IGNORE_EXCEPTIONS", "True").lower() == "true",
+            },
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "khusi-local-cache",
+            "TIMEOUT": CACHE_TIMEOUT,
+        }
+    }
 
 # CORS Settings
 CORS_ALLOW_ALL_ORIGINS = True
@@ -210,8 +237,14 @@ EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower() == 'true'
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
-DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'Khusi Website <no-reply@khusiwebsite.com>')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'Soul Craft Studio <no-reply@soulcraftstudio.com>')
 
 # Frontend URL (used in email templates for links)
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
 
+# Celery uses Redis as the outgoing email queue broker.
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', REDIS_URL or 'redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', REDIS_URL or 'redis://localhost:6379/0')
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_ALWAYS_EAGER = os.getenv('CELERY_TASK_ALWAYS_EAGER', 'False').lower() == 'true'
+CELERY_TASK_EAGER_PROPAGATES = True

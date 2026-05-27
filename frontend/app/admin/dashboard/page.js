@@ -6,7 +6,7 @@ import Footer from '../../../components/Footer';
 import { useAuth } from '../../../context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { getAdminStats, getAdminOrders, updateAdminOrder } from '../../../lib/api';
-import { Package, ShoppingBag, Banknote, Clock, ChevronLeft, Loader2, Search, ExternalLink, Image as ImageIcon, TrendingUp, Mail } from 'lucide-react';
+import { Package, ShoppingBag, Banknote, Clock, ChevronLeft, Loader2, Search, ExternalLink, Image as ImageIcon, Mail, FileText } from 'lucide-react';
 import Link from 'next/link';
 
 export default function AdminDashboardPage() {
@@ -55,12 +55,9 @@ export default function AdminDashboardPage() {
     setUpdating(orderId);
     try {
       await updateAdminOrder(orderId, { [field]: value });
-      // Refresh local state without full reload for smoothness
       setOrders(orders.map(o => o.id === orderId ? { ...o, [field]: value } : o));
-      
-      // Update stats if we updated a PENDING order to something else or verified payment
       if (field === 'status' || field === 'payment_status') {
-         getAdminStats().then(setStats);
+        getAdminStats().then(setStats);
       }
     } catch (err) {
       console.error('Update failed:', err);
@@ -119,7 +116,7 @@ export default function AdminDashboardPage() {
 
           {/* Stats Grid */}
           {stats && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 md:gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 md:gap-6">
               <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex flex-col gap-4">
                 <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center">
                   <Banknote className="w-6 h-6" />
@@ -206,7 +203,7 @@ export default function AdminDashboardPage() {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-[800px]">
+              <table className="w-full text-left border-collapse min-w-[900px]">
                 <thead>
                   <tr className="border-b-2 border-slate-50">
                     <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400 pl-4">Order Details</th>
@@ -214,12 +211,13 @@ export default function AdminDashboardPage() {
                     <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Payment Info</th>
                     <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Payment Status</th>
                     <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Order Status</th>
+                    <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Invoice</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {filteredOrders.length === 0 ? (
                     <tr>
-                      <td colSpan="5" className="py-8 text-center text-slate-500 text-sm">No orders found.</td>
+                      <td colSpan="6" className="py-8 text-center text-slate-500 text-sm">No orders found.</td>
                     </tr>
                   ) : filteredOrders.map((order) => (
                     <tr key={order.id} className="hover:bg-slate-50/50 transition-colors group">
@@ -244,17 +242,15 @@ export default function AdminDashboardPage() {
                       </td>
                       <td className="py-6 pr-4 align-top">
                         <div className="flex flex-col gap-2">
-                          {order.payment_id ? (
+                          {order.payment_reference && (
                             <div className="flex items-center gap-2 text-xs">
-                              <span className="font-black text-slate-400 uppercase tracking-widest text-[9px]">ID:</span>
-                              <span className="font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded">{order.payment_id}</span>
+                              <span className="font-black text-slate-400 uppercase tracking-widest text-[9px]">Ref:</span>
+                              <span className="font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded">{order.payment_reference}</span>
                             </div>
-                          ) : (
-                            <span className="text-xs text-slate-400 italic">No Txn ID</span>
                           )}
-                          
-                          {order.screenshot_id ? (
-                            <a href={order.screenshot_id} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-xs text-indigo-600 hover:text-indigo-800 font-bold bg-indigo-50 px-3 py-1.5 rounded-lg w-fit transition-colors">
+                          <span className="text-xs text-slate-500 font-mono">{order.upi_transaction_id || 'No UPI Transaction ID'}</span>
+                          {order.screenshot_url ? (
+                            <a href={order.screenshot_url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-xs text-indigo-600 hover:text-indigo-800 font-bold bg-indigo-50 px-3 py-1.5 rounded-lg w-fit transition-colors">
                               <ImageIcon className="w-3 h-3" /> View Screenshot
                             </a>
                           ) : (
@@ -263,7 +259,7 @@ export default function AdminDashboardPage() {
                         </div>
                       </td>
                       <td className="py-6 pr-4 align-top">
-                        <select 
+                        <select
                           value={order.payment_status}
                           onChange={(e) => handleStatusUpdate(order.id, 'payment_status', e.target.value)}
                           disabled={updating === order.id}
@@ -281,7 +277,7 @@ export default function AdminDashboardPage() {
                         </select>
                       </td>
                       <td className="py-6 pr-4 align-top">
-                        <select 
+                        <select
                           value={order.status}
                           onChange={(e) => handleStatusUpdate(order.id, 'status', e.target.value)}
                           disabled={updating === order.id}
@@ -298,6 +294,11 @@ export default function AdminDashboardPage() {
                           <option value="DELIVERED">Delivered</option>
                           <option value="CANCELLED">Cancelled</option>
                         </select>
+                      </td>
+                      <td className="py-6 pr-4 align-top">
+                        <Link href={`/orders/${order.id}/invoice`} target="_blank" className="inline-flex items-center gap-2 bg-slate-900 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-colors">
+                          <FileText className="w-3.5 h-3.5" /> Invoice
+                        </Link>
                       </td>
                     </tr>
                   ))}

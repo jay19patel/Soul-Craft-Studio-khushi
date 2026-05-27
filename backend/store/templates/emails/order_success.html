@@ -1,209 +1,42 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Order Confirmation - #{{ order.id }}</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f0f4f8; padding: 20px 0; }
-        .wrapper { max-width: 620px; margin: 0 auto; }
-        .container { background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.10); }
+{% extends "emails/base.html" %}
+{% block title %}Order confirmed | Soul Craft Studio{% endblock %}
+{% block content %}
+<h1>Your order is confirmed.</h1>
+<p class="lead">
+  Thank you, <strong>{{ order.customer_name|default:order.user.get_full_name|default:order.user.username }}</strong>.
+  We have received order #{{ order.id }} and will update you as it moves forward.
+</p>
+<div class="button-wrap"><a class="button" href="{{ frontend_url }}/orders/{{ order.id }}">View your order</a></div>
 
-        /* Header */
-        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 30px; text-align: center; }
-        .header .logo { font-size: 28px; font-weight: 900; color: #ffffff; letter-spacing: 2px; text-transform: uppercase; }
-        .header .subtitle { color: rgba(255,255,255,0.85); font-size: 14px; margin-top: 6px; letter-spacing: 1px; }
-        .header .checkmark { font-size: 48px; margin-bottom: 10px; }
+<p class="title">Order details</p>
+<table role="presentation" class="panel">
+  <tr class="row"><td class="label">Invoice number</td><td class="value">SCS-{{ order.id }}</td></tr>
+  <tr class="row"><td class="label">Invoice date</td><td class="value">{{ order.created_at|date:"M j, Y" }}</td></tr>
+</table>
 
-        /* Content */
-        .content { padding: 40px 30px; color: #1e293b; }
-        .greeting { font-size: 18px; margin-bottom: 12px; }
-        .greeting strong { color: #4f46e5; }
-        .intro-text { font-size: 15px; color: #475569; line-height: 1.7; margin-bottom: 30px; }
+<table role="presentation" class="items">
+  <tr><th align="left">Item</th><th class="center">Qty</th><th class="right">Amount</th></tr>
+  {% for item in order.items.all %}
+  <tr>
+    <td><strong>{% if item.variant %}{{ item.variant.product.name }}{% else %}Product{% endif %}</strong>
+      {% if item.variant.size or item.variant.color %}<br><span class="muted">{% if item.variant.size %}{{ item.variant.size }}{% endif %}{% if item.variant.size and item.variant.color %} / {% endif %}{% if item.variant.color %}{{ item.variant.color }}{% endif %}</span>{% endif %}
+    </td>
+    <td class="center">{{ item.quantity }}</td>
+    <td class="right">Rs. {{ item.price }}</td>
+  </tr>
+  {% endfor %}
+</table>
 
-        /* Order Info Box */
-        .order-info-box { background: linear-gradient(135deg, #f8faff 0%, #f0f4ff 100%); border: 1px solid #e0e7ff; border-radius: 12px; padding: 24px; margin-bottom: 30px; }
-        .order-info-box h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 1.5px; color: #6366f1; margin-bottom: 16px; font-weight: 700; }
-        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-        .info-item label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; display: block; margin-bottom: 4px; }
-        .info-item span { font-size: 14px; font-weight: 600; color: #1e293b; }
-        .info-item.full { grid-column: 1 / -1; }
-        .status-badge { display: inline-block; background-color: #fef3c7; color: #d97706; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
-        .payment-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
-        .payment-badge.verified { background-color: #dcfce7; color: #16a34a; }
-        .payment-badge.pending { background-color: #fef3c7; color: #d97706; }
-
-        /* Items Table */
-        .section-title { font-size: 13px; text-transform: uppercase; letter-spacing: 1.5px; color: #64748b; margin-bottom: 16px; font-weight: 700; }
-        .items-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-        .items-table thead tr { background-color: #f8fafc; }
-        .items-table th { text-align: left; padding: 12px 14px; font-size: 11px; text-transform: uppercase; color: #94a3b8; letter-spacing: 1px; font-weight: 700; border-bottom: 2px solid #e2e8f0; }
-        .items-table th.right { text-align: right; }
-        .items-table th.center { text-align: center; }
-        .items-table td { padding: 16px 14px; border-bottom: 1px solid #f1f5f9; font-size: 14px; vertical-align: top; }
-        .items-table td.center { text-align: center; color: #64748b; }
-        .items-table td.right { text-align: right; font-weight: 600; color: #1e293b; }
-        .item-name { font-weight: 600; color: #1e293b; margin-bottom: 4px; }
-        .item-variant { font-size: 12px; color: #94a3b8; }
-
-        /* Total Row */
-        .total-section { background-color: #f8fafc; border-radius: 12px; padding: 20px 14px; margin-bottom: 32px; }
-        .total-row { display: flex; justify-content: space-between; align-items: center; }
-        .total-row .label { font-size: 14px; color: #64748b; }
-        .total-row .amount { font-size: 22px; font-weight: 900; color: #4f46e5; }
-
-        /* Buttons */
-        .button-group { text-align: center; margin-bottom: 30px; }
-        .btn { display: inline-block; text-decoration: none; padding: 14px 28px; border-radius: 50px; font-weight: 700; font-size: 14px; letter-spacing: 0.5px; margin: 6px; }
-        .btn-primary { background: linear-gradient(135deg, #667eea, #764ba2); color: #ffffff; }
-        .btn-secondary { background-color: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
-
-        /* UPI Note */
-        .upi-note { background-color: #fffbeb; border: 1px solid #fde68a; border-radius: 10px; padding: 16px; margin-bottom: 28px; text-align: center; }
-        .upi-note p { font-size: 13px; color: #92400e; line-height: 1.6; }
-        .upi-note strong { color: #d97706; }
-
-        /* Footer */
-        .footer { background-color: #f8fafc; padding: 24px 30px; text-align: center; border-top: 1px solid #e2e8f0; }
-        .footer p { font-size: 12px; color: #94a3b8; line-height: 1.6; }
-        .footer a { color: #6366f1; text-decoration: none; }
-
-        @media (max-width: 480px) {
-            .content { padding: 24px 20px; }
-            .info-grid { grid-template-columns: 1fr; }
-            .btn { display: block; margin: 8px 0; }
-        }
-    </style>
-</head>
-<body>
-<div class="wrapper">
-    <div class="container">
-        <!-- Header -->
-        <div class="header">
-            <div class="checkmark">🎉</div>
-            <div class="logo">Khusi</div>
-            <div class="subtitle">Order Confirmed!</div>
-        </div>
-
-        <!-- Content -->
-        <div class="content">
-            <p class="greeting">Hi <strong>{{ order.customer_name|default:order.user.get_full_name|default:order.user.username }}</strong>,</p>
-            <p class="intro-text">
-                Thank you for your order! We've received it and will start processing it soon. 
-                You'll receive another email once your order is shipped.
-            </p>
-
-            <!-- Order Info -->
-            <div class="order-info-box">
-                <h3>📦 Order Summary</h3>
-                <div class="info-grid">
-                    <div class="info-item">
-                        <label>Order ID</label>
-                        <span>#{{ order.id }}</span>
-                    </div>
-                    <div class="info-item">
-                        <label>Date</label>
-                        <span>{{ order.created_at|date:"M j, Y" }}</span>
-                    </div>
-                    <div class="info-item">
-                        <label>Order Status</label>
-                        <span><span class="status-badge">{{ order.get_status_display }}</span></span>
-                    </div>
-                    <div class="info-item">
-                        <label>Payment</label>
-                        <span>
-                            {% if order.payment_status == 'VERIFIED' %}
-                                <span class="payment-badge verified">✓ Verified</span>
-                            {% else %}
-                                <span class="payment-badge pending">⏳ Pending</span>
-                            {% endif %}
-                        </span>
-                    </div>
-                    <div class="info-item full">
-                        <label>Shipping Address</label>
-                        <span>
-                            {{ order.shipping_address }}{% if order.city %}, {{ order.city }}{% endif %}{% if order.state %}, {{ order.state }}{% endif %}{% if order.pincode %} - {{ order.pincode }}{% endif %}
-                        </span>
-                    </div>
-                    {% if order.customer_phone %}
-                    <div class="info-item full">
-                        <label>Phone</label>
-                        <span>{{ order.customer_phone }}</span>
-                    </div>
-                    {% endif %}
-                </div>
-            </div>
-
-            <!-- Items -->
-            <p class="section-title">🛍️ Items Ordered</p>
-            <table class="items-table">
-                <thead>
-                    <tr>
-                        <th>Product</th>
-                        <th class="center">Qty</th>
-                        <th class="right">Price</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for item in order.items.all %}
-                    <tr>
-                        <td>
-                            <div class="item-name">
-                                {% if item.variant %}{{ item.variant.product.name }}{% else %}Product (Unavailable){% endif %}
-                            </div>
-                            {% if item.variant %}
-                                {% if item.variant.size or item.variant.color %}
-                                <div class="item-variant">
-                                    {% if item.variant.size %}Size: {{ item.variant.size }}{% endif %}
-                                    {% if item.variant.size and item.variant.color %} · {% endif %}
-                                    {% if item.variant.color %}Color: {{ item.variant.color }}{% endif %}
-                                </div>
-                                {% endif %}
-                            {% endif %}
-                        </td>
-                        <td class="center">{{ item.quantity }}</td>
-                        <td class="right">₹{{ item.price }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-
-            <!-- Total -->
-            <div class="total-section">
-                <div class="total-row">
-                    <span class="label">Total Amount Paid</span>
-                    <span class="amount">₹{{ order.total_amount }}</span>
-                </div>
-            </div>
-
-            <!-- UPI Payment Note (if payment pending) -->
-            {% if order.payment_status == 'PENDING' %}
-            <div class="upi-note">
-                <p>
-                    <strong>⚠️ Payment Pending Verification</strong><br>
-                    If you paid via UPI, your payment screenshot is under review. 
-                    You'll be notified once verified (usually within 1-2 hours).
-                </p>
-            </div>
-            {% endif %}
-
-            <!-- Action Buttons -->
-            <div class="button-group">
-                <a href="{{ frontend_url }}/orders/{{ order.id }}" class="btn btn-primary">Track My Order</a>
-                <a href="{{ frontend_url }}/order-success?id={{ order.id }}" class="btn btn-secondary">View Invoice</a>
-            </div>
-        </div>
-
-        <!-- Footer -->
-        <div class="footer">
-            <p>
-                This email was sent to <strong>{{ order.customer_email|default:order.user.email }}</strong><br>
-                &copy; {% now "Y" %} Khusi. All rights reserved.<br>
-                <a href="{{ frontend_url }}">Visit our store</a>
-            </p>
-        </div>
-    </div>
-</div>
-</body>
-</html>
+<table role="presentation" class="panel">
+  <tr class="row"><td class="label">Deliver to</td><td class="value">{{ order.customer_name }}</td></tr>
+  <tr class="row"><td class="label">Shipping address</td><td class="value">{{ order.shipping_address }}</td></tr>
+</table>
+<p class="title">Payment details</p>
+<table role="presentation" class="panel">
+  <tr class="row"><td class="label">Payment reference</td><td class="value">{{ order.payment_reference|default:"Not provided" }}</td></tr>
+  <tr class="row"><td class="label">UPI transaction ID</td><td class="value">{{ order.upi_transaction_id|default:"Not provided" }}</td></tr>
+  <tr class="row"><td class="label">Total amount</td><td class="value">Rs. {{ order.total_amount }}</td></tr>
+</table>
+<p class="notice">Your detailed invoice is attached as a PDF to this email.</p>
+{% endblock %}
+{% block footer %}Sent to {{ order.customer_email|default:order.user.email }} for order #{{ order.id }}.<br>{% endblock %}
