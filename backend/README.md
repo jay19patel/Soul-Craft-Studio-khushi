@@ -23,8 +23,13 @@ The seed command is idempotent, so it updates the same starter records instead o
 For Vercel production, update `.env`:
 
 ```env
+ENVIRONMENT=development
+SECRET_KEY=your-long-random-django-secret
 ALLOWED_HOSTS=your-api-domain.com
 CORS_ALLOWED_ORIGINS=https://your-frontend.vercel.app
 CSRF_TRUSTED_ORIGINS=https://your-frontend.vercel.app
 FRONTEND_URL=https://your-frontend.vercel.app
+POSTGRES_PASSWORD=your-strong-postgres-password
+DATABASE_URL=postgresql://khusi:your-strong-postgres-password@postgres:5432/khusi
+DJANGO_SUPERUSER_PASSWORD=your-strong-admin-password
 ```
