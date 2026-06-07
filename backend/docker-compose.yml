@@ -1,0 +1,102 @@
+services:
+  web:
+    build:
+      context: .
+    image: khusi-backend:latest
+    env_file:
+      - .env
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-khusi}:${POSTGRES_PASSWORD:-khusi_password}@postgres:5432/${POSTGRES_DB:-khusi}
+      REDIS_URL: redis://redis:6379/1
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      CACHE_TIMEOUT: 300
+      CACHE_KEY_PREFIX: khusi
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      DJANGO_SUPERUSER_USERNAME: ${DJANGO_SUPERUSER_USERNAME:-admin}
+      DJANGO_SUPERUSER_EMAIL: ${DJANGO_SUPERUSER_EMAIL:-admin@example.com}
+      DJANGO_SUPERUSER_PASSWORD: ${DJANGO_SUPERUSER_PASSWORD:-admin123456}
+      SEED_INITIAL_DATA: ${SEED_INITIAL_DATA:-True}
+    expose:
+      - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - khusi_media:/app/media
+      - khusi_static:/app/staticfiles
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      web:
+        condition: service_started
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - khusi_media:/app/media:ro
+      - khusi_static:/app/staticfiles:ro
+    restart: unless-stopped
+
+  celery-worker:
+    build:
+      context: .
+    image: khusi-backend:latest
+    env_file:
+      - .env
+    command: celery -A ecommerce worker --loglevel=info
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-khusi}:${POSTGRES_PASSWORD:-khusi_password}@postgres:5432/${POSTGRES_DB:-khusi}
+      REDIS_URL: redis://redis:6379/1
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+    depends_on:
+      web:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - khusi_media:/app/media
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-khusi}
+      POSTGRES_USER: ${POSTGRES_USER:-khusi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-khusi_password}
+    volumes:
+      - khusi_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-khusi} -d ${POSTGRES_DB:-khusi}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - khusi_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  khusi_postgres:
+  khusi_redis:
+  khusi_media:
+  khusi_static:

@@ -33,7 +33,12 @@ IS_PRODUCTION = ENVIRONMENT == 'production'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = not IS_PRODUCTION
 
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
+ALLOWED_HOSTS = [host.strip() for host in os.getenv("ALLOWED_HOSTS", "*").split(",") if host.strip()]
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",")
+    if origin.strip()
+]
 
 
 # Application definition
@@ -97,12 +102,16 @@ WSGI_APPLICATION = "ecommerce.wsgi.application"
 
 
 # Database
-# Development  → SQLite (zero config, local only)
-# Production   → Railway PostgreSQL (from DATABASE_PUBLIC_URL env var)
+# Development  -> SQLite (zero config, local only)
+# Production   -> PostgreSQL (DATABASE_URL)
 
 if IS_PRODUCTION:
     import dj_database_url  # type: ignore[import]
-    _db_url = os.getenv('DATABASE_PUBLIC_URL') or os.getenv('DATABASE_URL')
+    _db_url = os.getenv('DATABASE_URL')
+    if not _db_url:
+        raise RuntimeError(
+            "Production database is not configured. Set DATABASE_URL."
+        )
     DATABASES = {'default': dj_database_url.config(default=_db_url, conn_max_age=600)}
 else:
     DATABASES = {
@@ -186,7 +195,12 @@ else:
     }
 
 # CORS Settings
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW_ALL_ORIGINS", "False").lower() == "true"
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
 
 # Django REST Framework Settings
 REST_FRAMEWORK = {
