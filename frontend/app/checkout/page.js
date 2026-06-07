@@ -27,7 +27,7 @@ const CheckoutPage = () => {
     state: '',
   });
   const [paymentData, setPaymentData] = useState({
-    paymentId: '',
+    upiTransactionId: '',
   });
   const [screenshotFile, setScreenshotFile] = useState(null);
   const [screenshotPreview, setScreenshotPreview] = useState(null);
@@ -162,10 +162,10 @@ const CheckoutPage = () => {
         pincode: formData.pincode,
         items: orderItems,
         total_amount: cartTotal,
-        payment_id: paymentData.paymentId || null,
+        upi_transaction_id: paymentData.upiTransactionId || null,
         screenshot_id: screenshotId,
         // ? Backend ``PaymentStatus``: pending | received | verified | failed
-        payment_status: paymentData.paymentId?.trim() ? 'received' : 'pending',
+        payment_status: paymentData.upiTransactionId?.trim() ? 'received' : 'pending',
         notes: null,
         status: 'pending',
         cart_id: cartId || null,
@@ -412,12 +412,12 @@ const CheckoutPage = () => {
                       <div className="flex-1 flex flex-col justify-center gap-6">
                         <div className="flex flex-col gap-2">
                           <label className="text-[10px] font-black uppercase tracking-widest text-blue-950 px-1">
-                            Step 1: Enter UPI / Transaction ID <span className="text-red-500">*</span>
+                            Step 1: Enter UPI Transaction ID <span className="text-red-500">*</span>
                           </label>
                           <input
                             required
-                            name="paymentId"
-                            value={paymentData.paymentId}
+                            name="upiTransactionId"
+                            value={paymentData.upiTransactionId}
                             onChange={handlePaymentChange}
                             placeholder="e.g., 123456789012"
                             className="w-full bg-white border border-slate-200 rounded-2xl px-5 py-4 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:font-normal placeholder:text-slate-400"

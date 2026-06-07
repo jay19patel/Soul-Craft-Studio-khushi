@@ -113,10 +113,16 @@ const OrderSuccessContent = () => {
                     : '🟡 Payment pending'}
             </span>
           </div>
-          {order.payment_id && (
+          {order.payment_reference && (
             <div className="flex flex-col gap-1">
-              <span className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Txn ID</span>
-              <span className="text-[11px] font-mono text-slate-600 break-all">{order.payment_id}</span>
+              <span className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Payment Reference</span>
+              <span className="text-[11px] font-mono text-slate-600 break-all">{order.payment_reference}</span>
+            </div>
+          )}
+          {order.upi_transaction_id && (
+            <div className="flex flex-col gap-1">
+              <span className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">UPI Transaction ID</span>
+              <span className="text-[11px] font-mono text-slate-600 break-all">{order.upi_transaction_id}</span>
             </div>
           )}
         </div>

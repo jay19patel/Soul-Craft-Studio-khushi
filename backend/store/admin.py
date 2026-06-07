@@ -1,7 +1,8 @@
 from django.contrib import admin
 from .models import (
     Category, Product, ProductVariant, ProductImage, Cart, CartItem, 
-    Order, OrderItem, Address, Contact, Payment, Testimonial, ContactMessage
+    Order, OrderItem, Address, Contact, Payment, Testimonial, ContactMessage,
+    EmailLog
 )
 
 @admin.register(Category)
@@ -43,9 +44,9 @@ class OrderItemInline(admin.TabularInline):
 
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
-    list_display = ['id', 'user', 'status', 'total_amount', 'created_at']
+    list_display = ['id', 'payment_reference', 'user', 'status', 'total_amount', 'created_at']
     list_filter = ['status', 'created_at']
-    search_fields = ['user__username', 'shipping_address']
+    search_fields = ['user__username', 'shipping_address', 'payment_reference', 'upi_transaction_id']
     inlines = [OrderItemInline]
 
 @admin.register(Address)
@@ -62,9 +63,9 @@ class ContactAdmin(admin.ModelAdmin):
 
 @admin.register(Payment)
 class PaymentAdmin(admin.ModelAdmin):
-    list_display = ['id', 'user', 'order', 'amount', 'status', 'submitted_at']
+    list_display = ['id', 'payment_reference', 'user', 'order', 'amount', 'status', 'submitted_at']
     list_filter = ['status', 'submitted_at']
-    search_fields = ['user__username', 'order__id']
+    search_fields = ['user__username', 'order__id', 'payment_reference', 'upi_transaction_id']
 
 @admin.register(Testimonial)
 class TestimonialAdmin(admin.ModelAdmin):
@@ -78,6 +79,33 @@ class ContactMessageAdmin(admin.ModelAdmin):
     list_filter = ['is_read', 'created_at']
     search_fields = ['name', 'email', 'subject', 'message']
 
+@admin.register(EmailLog)
+class EmailLogAdmin(admin.ModelAdmin):
+    list_display = ['id', 'email_type', 'to_email', 'subject', 'status', 'attempts', 'queued_at', 'sent_at']
+    list_filter = ['status', 'email_type', 'queued_at', 'sent_at']
+    search_fields = ['to_email', 'from_email', 'subject', 'error_message']
+    readonly_fields = [
+        'email_type', 'status', 'subject', 'from_email', 'to_email',
+        'body_text', 'body_html', 'backend', 'user', 'order',
+        'attachment_name', 'attachment_mimetype', 'attempts', 'error_message',
+        'queued_at', 'sending_at', 'sent_at', 'failed_at',
+    ]
+    actions = ['retry_selected_emails']
+
+    @admin.action(description='Retry selected non-sent emails')
+    def retry_selected_emails(self, request, queryset):
+        from .tasks import send_queued_email
+
+        retryable = queryset.exclude(status=EmailLog.Status.SENT)
+        count = 0
+        for email_log in retryable:
+            email_log.status = EmailLog.Status.QUEUED
+            email_log.error_message = ''
+            email_log.save(update_fields=['status', 'error_message'])
+            send_queued_email.delay(email_log.pk)
+            count += 1
+        self.message_user(request, f'{count} email(s) queued for retry.')
+
 # Custom admin site grouping
 original_get_app_list = admin.site.get_app_list
 
@@ -89,7 +117,8 @@ def custom_get_app_list(self, request, app_label=None):
         'Customer Management': ['Users', 'Addresses', 'Contacts'],
         'Catalog': ['Categories', 'Products'],
         'Sales & Orders': ['Carts', 'Orders', 'Payments'],
-        'Support & Feedback': ['Contact messages', 'Testimonials']
+        'Support & Feedback': ['Contact messages', 'Testimonials'],
+        'Email Delivery': ['Email logs'],
     }
     
     new_app_list = []

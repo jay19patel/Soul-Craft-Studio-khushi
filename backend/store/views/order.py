@@ -27,6 +27,12 @@ class OrderViewSet(viewsets.ModelViewSet):
         data = request.data
         user = request.user if request.user.is_authenticated else None
 
+        valid_statuses = {choice[0] for choice in Order.STATUS_CHOICES}
+        valid_payment_statuses = {choice[0] for choice in Order.PAYMENT_STATUS_CHOICES}
+        order_status = str(data.get('status', 'PENDING')).upper()
+        payment_status = str(data.get('payment_status', 'PENDING')).upper()
+        upi_transaction_id = data.get('upi_transaction_id') or data.get('payment_id')
+
         order = Order.objects.create(
             user             = user,
             customer_name    = data.get('customer_name'),
@@ -37,9 +43,10 @@ class OrderViewSet(viewsets.ModelViewSet):
             state            = data.get('state'),
             pincode          = data.get('pincode'),
             total_amount     = data.get('total_amount', 0),
-            payment_id       = data.get('payment_id'),
+            upi_transaction_id = upi_transaction_id,
             screenshot_id    = data.get('screenshot_id'),
-            status           = data.get('status', 'PENDING'),
+            status           = order_status if order_status in valid_statuses else 'PENDING',
+            payment_status   = payment_status if payment_status in valid_payment_statuses else 'PENDING',
         )
 
         # Create order items
@@ -60,13 +67,15 @@ class OrderViewSet(viewsets.ModelViewSet):
                                extra={"order_id": order.id, "item": item})
 
         # Create payment record if provided
-        if data.get('payment_id') or data.get('screenshot_id'):
+        if upi_transaction_id or data.get('screenshot_id'):
             Payment.objects.create(
                 user           = user,
                 order          = order,
                 amount         = data.get('total_amount', 0),
+                payment_reference = order.payment_reference,
+                upi_transaction_id = upi_transaction_id,
                 screenshot_url = data.get('screenshot_id'),
-                status         = 'VERIFIED' if data.get('payment_id') else 'PENDING',
+                status         = 'VERIFIED' if upi_transaction_id else 'PENDING',
             )
 
         # Fire confirmation email + PDF invoice

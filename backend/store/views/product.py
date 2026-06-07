@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
     """Public read-only API for top-level product categories (with nested children)."""
 
-    queryset = Category.objects.filter(parent__isnull=True)
+    queryset = Category.objects.filter(parent__isnull=True).order_by('name', 'id')
     serializer_class = CategorySerializer
     permission_classes = [permissions.AllowAny]
 
@@ -24,7 +24,7 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
 class ProductViewSet(viewsets.ReadOnlyModelViewSet):
     """Public read-only API for active products."""
 
-    queryset = Product.objects.filter(is_active=True)
+    queryset = Product.objects.filter(is_active=True).order_by('-created_at', '-id')
     serializer_class = ProductSerializer
     permission_classes = [permissions.AllowAny]
 

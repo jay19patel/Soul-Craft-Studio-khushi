@@ -262,11 +262,6 @@ const OrderDetailPage = () => {
                 <div className="text-sm text-slate-600 leading-relaxed pl-1">
                   <p className="font-black text-blue-950">{order.customer_name}</p>
                   {order.shipping_address && <p>{order.shipping_address}</p>}
-                  {(order.city || order.state || order.pincode) && (
-                    <p className="text-slate-400">
-                      {[order.city, order.state, order.pincode].filter(Boolean).join(', ')}
-                    </p>
-                  )}
                   {order.customer_phone && (
                     <p className="text-slate-400 mt-1">📞 {order.customer_phone}</p>
                   )}
@@ -298,10 +293,16 @@ const OrderDetailPage = () => {
                     <ShieldCheck className="w-3.5 h-3.5" />
                     {paymentCfg.label}
                   </div>
-                  {order.payment_id && (
+                  {order.payment_reference && (
                     <div className="flex flex-col gap-1">
-                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Transaction ID</span>
-                      <span className="text-xs font-mono text-slate-600 break-all">{order.payment_id}</span>
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Payment Reference</span>
+                      <span className="text-xs font-mono text-slate-600 break-all">{order.payment_reference}</span>
+                    </div>
+                  )}
+                  {order.upi_transaction_id && (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">UPI Transaction ID</span>
+                      <span className="text-xs font-mono text-slate-600 break-all">{order.upi_transaction_id}</span>
                     </div>
                   )}
                 </div>

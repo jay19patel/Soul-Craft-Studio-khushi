@@ -14,6 +14,7 @@ from .order       import Order, OrderItem
 from .payment     import Payment
 from .user_profile import Address, Contact
 from .content     import Testimonial, ContactMessage
+from .email_log   import EmailLog
 
 __all__ = [
     "Category",
@@ -24,4 +25,5 @@ __all__ = [
     "Address", "Contact",
     "Testimonial",
     "ContactMessage",
+    "EmailLog",
 ]
