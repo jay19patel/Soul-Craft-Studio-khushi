@@ -20,6 +20,20 @@ Docker Compose sets `ENVIRONMENT=production` and uses PostgreSQL through `DATABA
 When `SEED_INITIAL_DATA=True`, startup seeds starter catalog data after migrations.
 The seed command is idempotent, so it updates the same starter records instead of duplicating them.
 
+To enable free HTTPS directly on the VM IP:
+
+```bash
+cd backend
+docker compose up -d --build
+sh docker/setup-ip-https.sh
+```
+
+Make sure VM firewall allows ports `80` and `443`. Renew manually with:
+
+```bash
+sh docker/renew-ip-https.sh
+```
+
 For Vercel production, update `.env`:
 
 ```env
