@@ -2,11 +2,11 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "http://35.226.230.226/api/:path*"
+      "destination": "https://35.226.230.226/api/:path*"
     },
     {
       "source": "/media/:path*",
-      "destination": "http://35.226.230.226/media/:path*"
+      "destination": "https://35.226.230.226/media/:path*"
     }
   ]
 }

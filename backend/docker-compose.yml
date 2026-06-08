@@ -8,9 +8,9 @@ services:
     environment:
       ENVIRONMENT: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-khusi}:${POSTGRES_PASSWORD:-khusi_password}@postgres:5432/${POSTGRES_DB:-khusi}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/1}
-      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      REDIS_URL: redis://redis:6379/1
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
       CACHE_TIMEOUT: ${CACHE_TIMEOUT:-300}
       CACHE_KEY_PREFIX: ${CACHE_KEY_PREFIX:-khusi}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
@@ -18,7 +18,7 @@ services:
       DJANGO_SUPERUSER_EMAIL: ${DJANGO_SUPERUSER_EMAIL:-admin@example.com}
       DJANGO_SUPERUSER_PASSWORD: ${DJANGO_SUPERUSER_PASSWORD:-admin123456}
       SEED_INITIAL_DATA: ${SEED_INITIAL_DATA:-True}
-      PORT: ${PORT:-8000}
+      PORT: 8000
       GUNICORN_WORKERS: ${GUNICORN_WORKERS:-3}
       GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-120}
     expose:
@@ -61,15 +61,15 @@ services:
     build:
       context: .
     image: khusi-backend:latest
+    command: celery -A ecommerce worker --loglevel=info
     env_file:
       - .env
-    command: celery -A ecommerce worker --loglevel=info
     environment:
       ENVIRONMENT: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-khusi}:${POSTGRES_PASSWORD:-khusi_password}@postgres:5432/${POSTGRES_DB:-khusi}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/1}
-      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      REDIS_URL: redis://redis:6379/1
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
     depends_on:
       web:
