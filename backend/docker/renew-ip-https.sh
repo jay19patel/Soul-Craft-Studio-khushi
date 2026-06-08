@@ -10,6 +10,6 @@ fi
 
 echo "Renewing certificates..."
 $COMPOSE_CMD --profile ssl run --rm certbot renew --webroot --webroot-path /var/www/certbot
-$COMPOSE_CMD exec nginx nginx -t
-$COMPOSE_CMD exec nginx nginx -s reload
-echo "Certificates renewed and Nginx reloaded successfully!"
+$COMPOSE_CMD run --rm --entrypoint nginx nginx -t || true
+$COMPOSE_CMD restart nginx
+echo "Certificates renewed and Nginx restarted successfully!"

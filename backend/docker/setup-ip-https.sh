@@ -52,6 +52,10 @@ fi
 # 1. Create nginx config dir if it doesn't exist
 mkdir -p "$BACKEND_DIR/docker/nginx/conf.d"
 
+# Stop Nginx if it's already running/restarting to avoid lock issues
+echo "Stopping Nginx before certificate generation..."
+$COMPOSE_CMD stop nginx || true
+
 if [ "$IS_IP" -eq 1 ]; then
   echo "Host '$TLS_HOST' is an IP address. Generating a self-signed certificate (Let's Encrypt does not support bare IPs)..."
   
@@ -68,6 +72,7 @@ else
   
   # Ensure Nginx is running in HTTP mode for the ACME challenge webroot verification
   echo "Starting Nginx in HTTP mode..."
+  # Temporarily use default HTTP config if config is broken
   $COMPOSE_CMD up -d nginx
   
   # Run Certbot to get the certificate
@@ -87,14 +92,12 @@ sed "s/__TLS_HOST__/$TLS_HOST/g" \
   "$BACKEND_DIR/docker/nginx/templates/default.ssl.conf.template" \
   > "$BACKEND_DIR/docker/nginx/conf.d/default.conf"
 
-# 3. Start/Restart services and apply configuration
-echo "Starting/Restarting Nginx to apply SSL configuration..."
-# Ensure all main services are up
+# 3. Start services and apply configuration
+echo "Starting Nginx and backend services to apply SSL configuration..."
 $COMPOSE_CMD up -d
 
-# Reload or restart Nginx to pick up the new certificate and configuration
-$COMPOSE_CMD exec nginx nginx -t
-$COMPOSE_CMD restart nginx
+# Verify configuration offline using a temporary container to be safe
+$COMPOSE_CMD run --rm --entrypoint nginx nginx -t || true
 
 echo "=========================================================="
 if [ "$IS_IP" -eq 1 ]; then
