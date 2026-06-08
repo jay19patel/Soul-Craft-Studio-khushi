@@ -41,6 +41,18 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
+# Trust TLS_HOST dynamically
+tls_host = os.getenv("TLS_HOST")
+if tls_host:
+    if tls_host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(tls_host)
+    https_origin = f"https://{tls_host}"
+    if https_origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(https_origin)
+    http_origin = f"http://{tls_host}"
+    if http_origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(http_origin)
+
 
 # Application definition
 
