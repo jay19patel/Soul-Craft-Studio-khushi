@@ -531,7 +531,7 @@ const CheckoutPage = () => {
                       <div className="flex flex-col justify-center gap-1">
                         <p className="text-xs font-black uppercase text-blue-950 line-clamp-1">{item.name}</p>
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                          {item.quantity} × ₹{(item.priceValue ?? item.price ?? 0).toLocaleString('en-IN')}
+                          {item.quantity} × ₹{Number(item.priceValue ?? item.price ?? 0).toLocaleString('en-IN')}
                         </p>
                       </div>
                     </div>

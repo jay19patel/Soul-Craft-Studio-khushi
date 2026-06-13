@@ -5,8 +5,8 @@ import Navbar from '../../../components/Navbar';
 import Footer from '../../../components/Footer';
 import { useAuth } from '../../../context/AuthContext';
 import { useRouter } from 'next/navigation';
-import { getAdminProducts, createAdminProduct, updateAdminProduct, deleteAdminProduct } from '../../../lib/api';
-import { Package, Plus, Search, Edit3, Trash2, X, ChevronLeft } from 'lucide-react';
+import { getAdminProducts, createAdminProduct, updateAdminProduct, deleteAdminProduct, getCategories, createAdminCategory, updateAdminCategory, deleteAdminCategory } from '../../../lib/api';
+import { Package, Plus, Search, Edit3, Trash2, X, ChevronLeft, Settings } from 'lucide-react';
 import Link from 'next/link';
 
 export default function AdminProductsPage() {
@@ -14,6 +14,7 @@ export default function AdminProductsPage() {
   const router = useRouter();
 
   const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   
@@ -28,15 +29,35 @@ export default function AdminProductsPage() {
     category: ''
   });
 
+  // Category Management State
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState(null);
+  const [categoryFormData, setCategoryFormData] = useState({
+    name: '',
+    slug: '',
+    description: '',
+    image: null
+  });
+
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
       router.push('/login');
     }
   }, [isAuthenticated, authLoading, router]);
 
+  const fetchCategories = async () => {
+    try {
+      const data = await getCategories();
+      setCategories(data || []);
+    } catch (err) {
+      console.error('Failed to fetch categories', err);
+    }
+  };
+
   useEffect(() => {
     if (isAuthenticated && user?.is_superuser) {
       fetchProducts();
+      fetchCategories();
     } else if (isAuthenticated && !user?.is_superuser) {
       router.push('/profile');
     }
@@ -62,7 +83,7 @@ export default function AdminProductsPage() {
         slug: product.slug || '',
         description: product.description || '',
         price: product.priceValue || product.price || '',
-        category: product.category || '',
+        category: product.category?.id || product.category_id || '',
         image: null,
       });
     } else {
@@ -85,6 +106,10 @@ export default function AdminProductsPage() {
       submitData.append('slug', formData.slug || formData.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, ''));
       submitData.append('description', formData.description);
       submitData.append('price', formData.price);
+      submitData.append('base_price', formData.price);
+      if (formData.category) {
+        submitData.append('category_id', formData.category);
+      }
       if (formData.image) {
         submitData.append('image', formData.image);
       }
@@ -110,6 +135,61 @@ export default function AdminProductsPage() {
         alert('Error deleting product: ' + err.message);
       }
     }
+  };
+
+  // Category CRUD Handlers
+  const handleCategorySave = async (e) => {
+    e.preventDefault();
+    try {
+      const submitData = new FormData();
+      submitData.append('name', categoryFormData.name);
+      submitData.append('slug', categoryFormData.slug || categoryFormData.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, ''));
+      submitData.append('description', categoryFormData.description);
+      if (categoryFormData.image) {
+        submitData.append('image', categoryFormData.image);
+      }
+
+      if (editingCategory) {
+        await updateAdminCategory(editingCategory.id, submitData);
+      } else {
+        await createAdminCategory(submitData);
+      }
+      
+      // Reset form and reload
+      setCategoryFormData({ name: '', slug: '', description: '', image: null });
+      setEditingCategory(null);
+      fetchCategories();
+      fetchProducts(); // Refresh product list in case category names updated
+    } catch (err) {
+      alert('Error saving category: ' + err.message);
+    }
+  };
+
+  const handleCategoryDelete = async (id) => {
+    if (window.confirm("Are you sure you want to delete this category? All products under it will revert to the default category.")) {
+      try {
+        await deleteAdminCategory(id);
+        fetchCategories();
+        fetchProducts();
+      } catch (err) {
+        alert('Error deleting category: ' + err.message);
+      }
+    }
+  };
+
+  const startCategoryEdit = (cat) => {
+    setEditingCategory(cat);
+    setCategoryFormData({
+      name: cat.name || '',
+      slug: cat.slug || '',
+      description: cat.description || '',
+      image: null
+    });
+  };
+
+  const cancelCategoryEdit = () => {
+    setEditingCategory(null);
+    setCategoryFormData({ name: '', slug: '', description: '', image: null });
   };
 
   const filteredProducts = products.filter(p => 
@@ -148,12 +228,20 @@ export default function AdminProductsPage() {
               </p>
             </div>
             
-            <button 
-              onClick={() => openModal()}
-              className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-4 rounded-2xl text-sm font-black uppercase tracking-widest shadow-xl shadow-indigo-200 hover:bg-indigo-700 hover:shadow-2xl hover:-translate-y-1 transition-all active:scale-95"
-            >
-              <Plus className="w-5 h-5" /> Add Product
-            </button>
+            <div className="flex items-center gap-3 flex-wrap">
+              <button 
+                onClick={() => setIsCategoryModalOpen(true)}
+                className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 px-6 py-4 rounded-2xl text-sm font-black uppercase tracking-widest transition-all active:scale-95 border border-slate-200"
+              >
+                <Settings className="w-4 h-4 text-slate-500" /> Manage Categories
+              </button>
+              <button 
+                onClick={() => openModal()}
+                className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-4 rounded-2xl text-sm font-black uppercase tracking-widest shadow-xl shadow-indigo-200 hover:bg-indigo-700 hover:shadow-2xl hover:-translate-y-1 transition-all active:scale-95"
+              >
+                <Plus className="w-5 h-5" /> Add Product
+              </button>
+            </div>
           </div>
 
           {/* List Section */}
@@ -178,8 +266,7 @@ export default function AdminProductsPage() {
               <table className="w-full text-left border-collapse min-w-[800px]">
                 <thead>
                   <tr className="border-b-2 border-slate-50">
-                    <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400 pl-4 w-16">Image</th>
-                    <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Product Name</th>
+                    <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400 pl-4">Product Details</th>
                     <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Price</th>
                     <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400 text-right pr-4">Actions</th>
                   </tr>
@@ -187,30 +274,39 @@ export default function AdminProductsPage() {
                 <tbody className="divide-y divide-slate-50">
                   {filteredProducts.length === 0 ? (
                     <tr>
-                      <td colSpan="4" className="py-8 text-center text-slate-500 text-sm font-medium">No products found.</td>
+                      <td colSpan="3" className="py-8 text-center text-slate-500 text-sm font-medium">No products found.</td>
                     </tr>
                   ) : filteredProducts.map((product) => (
                     <tr key={product.id} className="hover:bg-slate-50/50 transition-colors group">
                       <td className="py-4 pl-4 align-middle">
-                        <div className="w-12 h-12 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center">
-                          {product.image ? (
-                            <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
-                          ) : (
-                            <Package className="w-5 h-5 text-slate-400" />
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-4 align-middle">
-                        <div className="flex flex-col gap-1">
-                          <span className="font-black text-sm text-slate-900">{product.name}</span>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{product.slug}</span>
+                        <div className="flex items-center gap-4">
+                          {/* Product Image */}
+                          <div className="w-12 h-12 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0">
+                            {product.image ? (
+                              <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <Package className="w-5 h-5 text-slate-400" />
+                            )}
+                          </div>
+                          {/* Product Info */}
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-black text-sm text-slate-900">{product.name}</span>
+                              {product.category?.name && (
+                                <span className="bg-indigo-50 text-indigo-600 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                                  {product.category.name}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{product.slug}</span>
+                          </div>
                         </div>
                       </td>
                       <td className="py-4 align-middle">
                         <span className="font-black text-indigo-600">₹{Number(product.priceValue || product.price || 0).toLocaleString('en-IN')}</span>
                       </td>
                       <td className="py-4 pr-4 align-middle text-right">
-                        <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center justify-end gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                           <button 
                             onClick={() => openModal(product)}
                             className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors"
@@ -271,6 +367,23 @@ export default function AdminProductsPage() {
               </div>
 
               <div className="flex flex-col gap-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Category</label>
+                <select
+                  required
+                  value={formData.category}
+                  onChange={(e) => setFormData({...formData, category: e.target.value})}
+                  className="w-full bg-slate-50 border border-slate-100 rounded-xl py-3 px-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                >
+                  <option value="">Select Category</option>
+                  {categories.map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-2">
                 <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Description</label>
                 <textarea 
                   rows={4}
@@ -300,6 +413,142 @@ export default function AdminProductsPage() {
               </div>
 
             </form>
+          </div>
+        </div>
+      )}
+      {/* Category Management Modal */}
+      {isCategoryModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-[40px] w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col transform transition-all h-[80vh]">
+            <div className="px-8 py-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <h3 className="text-xl font-black uppercase tracking-tight text-indigo-950">
+                Manage Categories
+              </h3>
+              <button 
+                onClick={() => { setIsCategoryModalOpen(false); cancelCategoryEdit(); }} 
+                className="text-slate-400 hover:text-slate-700 bg-white p-2 rounded-full shadow-sm"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+              {/* Left Column: Categories List */}
+              <div className="w-full md:w-1/2 p-8 border-r border-slate-100 overflow-y-auto flex flex-col gap-6">
+                <h4 className="text-xs font-black uppercase tracking-widest text-slate-400">Existing Categories ({categories.length})</h4>
+                <div className="flex flex-col gap-3">
+                  {categories.length === 0 ? (
+                    <p className="text-sm font-medium text-slate-500 text-center py-6">No categories found.</p>
+                  ) : (
+                    categories.map((cat) => (
+                      <div key={cat.id} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-100 hover:border-indigo-100 transition-colors">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-slate-200 overflow-hidden flex-shrink-0 flex items-center justify-center border border-slate-200">
+                            {cat.img || cat.image || cat.image_url ? (
+                              <img src={cat.img || cat.image || cat.image_url} alt="" className="w-full h-full object-cover" />
+                            ) : (
+                              <Package className="w-4 h-4 text-slate-400" />
+                            )}
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="font-bold text-sm text-slate-900 leading-tight">{cat.name}</span>
+                            <span className="text-[10px] font-medium text-slate-400 font-mono mt-0.5">{cat.slug}</span>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center gap-1">
+                          <button 
+                            type="button"
+                            onClick={() => startCategoryEdit(cat)}
+                            className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button 
+                            type="button"
+                            onClick={() => handleCategoryDelete(cat.id)}
+                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+              
+              {/* Right Column: Category Form */}
+              <div className="w-full md:w-1/2 p-8 overflow-y-auto bg-slate-50/30 flex flex-col gap-6">
+                <h4 className="text-xs font-black uppercase tracking-widest text-slate-400">
+                  {editingCategory ? 'Edit Category' : 'Add New Category'}
+                </h4>
+                
+                <form onSubmit={handleCategorySave} className="flex flex-col gap-5">
+                  <div className="flex flex-col gap-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">Category Name</label>
+                    <input 
+                      type="text" 
+                      required
+                      value={categoryFormData.name}
+                      onChange={(e) => setCategoryFormData({...categoryFormData, name: e.target.value})}
+                      placeholder="e.g. Handmade Woolens"
+                      className="w-full bg-white border border-slate-100 rounded-xl py-3 px-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">Slug (URL Name)</label>
+                    <input 
+                      type="text" 
+                      value={categoryFormData.slug}
+                      onChange={(e) => setCategoryFormData({...categoryFormData, slug: e.target.value})}
+                      placeholder="e.g. handmade-woolens (Optional)"
+                      className="w-full bg-white border border-slate-100 rounded-xl py-3 px-4 text-sm font-semibold text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">Description</label>
+                    <textarea 
+                      rows={3}
+                      value={categoryFormData.description}
+                      onChange={(e) => setCategoryFormData({...categoryFormData, description: e.target.value})}
+                      placeholder="Category details..."
+                      className="w-full bg-white border border-slate-100 rounded-xl py-3 px-4 text-sm font-medium text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">Category Image</label>
+                    <input 
+                      type="file" 
+                      accept="image/*"
+                      onChange={(e) => setCategoryFormData({...categoryFormData, image: e.target.files[0]})}
+                      className="w-full bg-white border border-slate-100 rounded-xl py-2 px-4 text-xs font-medium text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    />
+                  </div>
+
+                  <div className="pt-4 flex justify-end gap-3">
+                    {editingCategory && (
+                      <button 
+                        type="button" 
+                        onClick={cancelCategoryEdit} 
+                        className="px-5 py-3 rounded-xl text-xs font-black uppercase tracking-widest text-slate-500 hover:bg-slate-100 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                    <button 
+                      type="submit" 
+                      className="bg-indigo-600 text-white px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-colors"
+                    >
+                      {editingCategory ? 'Update Category' : 'Save Category'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
           </div>
         </div>
       )}

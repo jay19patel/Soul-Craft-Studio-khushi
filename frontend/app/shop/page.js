@@ -186,9 +186,22 @@ const ShopPage = () => {
                         <h3 className="text-base font-[family-name:var(--font-climate-crisis)] uppercase text-blue-950 leading-tight group-hover:text-orange-500 transition-colors truncate pr-2">
                           <Link href={`/shop/${product.id}`}>{product.name}</Link>
                         </h3>
-                        <span className="text-base font-black text-slate-700 font-sans whitespace-nowrap">
-                          {product.priceDisplay}
-                        </span>
+                        <div className="flex flex-col items-end">
+                          {product.discount > 0 ? (
+                            <div className="flex flex-col items-end">
+                              <span className="text-xs line-through text-slate-400 font-sans leading-none">
+                                ₹{product.priceValue}
+                              </span>
+                              <span className="text-base font-black text-orange-600 font-sans whitespace-nowrap mt-1">
+                                ₹{Math.round(product.priceValue * (1 - product.discount / 100))}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-base font-black text-slate-700 font-sans whitespace-nowrap">
+                              {product.priceDisplay}
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       <div className="flex items-center justify-between mt-2 pt-3 border-t border-slate-100">

@@ -169,12 +169,6 @@ export default function ProfilePage() {
             <Phone className="w-5 h-5" />
             <span className="font-bold text-sm uppercase tracking-wider">Contacts</span>
           </button>
-          {user?.is_superuser && (
-            <button onClick={() => router.push('/admin/dashboard')} className="mt-4 p-4 rounded-2xl flex items-center gap-3 transition-all bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border-2 border-indigo-100">
-              <LayoutDashboard className="w-5 h-5" />
-              <span className="font-bold text-sm uppercase tracking-wider">Admin Dashboard</span>
-            </button>
-          )}
         </div>
 
         {/* Content Area */}

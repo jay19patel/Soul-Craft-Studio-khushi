@@ -152,9 +152,9 @@ const OrderDetailPage = () => {
                       </div>
                       <div className="text-right">
                         <p className="text-sm font-black text-blue-950">
-                          ₹{((item.price ?? 0) * item.quantity).toLocaleString('en-IN')}
+                          ₹{(Number(item.price ?? 0) * item.quantity).toLocaleString('en-IN')}
                         </p>
-                        <p className="text-[10px] text-slate-400">@₹{(item.price ?? 0).toLocaleString('en-IN')}</p>
+                        <p className="text-[10px] text-slate-400">@₹{Number(item.price ?? 0).toLocaleString('en-IN')}</p>
                       </div>
                     </div>
                   ))}

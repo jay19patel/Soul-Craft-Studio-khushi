@@ -197,7 +197,7 @@ const MyOrdersPage = () => {
                               <div className="flex-grow flex flex-col gap-1">
                                 <h4 className="text-base font-bold text-blue-950 group-hover/item:text-orange-500 transition-colors uppercase">{item.name}</h4>
                                 <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                                  {item.quantity} × ₹{(item.price ?? 0).toLocaleString('en-IN')}
+                                   {item.quantity} × ₹{Number(item.price ?? 0).toLocaleString('en-IN')}
                                 </p>
                               </div>
                             </div>

@@ -177,9 +177,23 @@ const ProductDetailPage = () => {
               <h1 className="text-3xl md:text-5xl font-[family-name:var(--font-climate-crisis)] uppercase text-blue-950 leading-tight">
                 {product.name}
               </h1>
-              <p className="text-2xl md:text-3xl font-black text-blue-600 font-sans">
-                {product.priceDisplay}
-              </p>
+              {product.discount > 0 ? (
+                <div className="flex items-baseline gap-3 mt-2">
+                  <span className="text-xl md:text-2xl line-through text-slate-400 font-sans">
+                    ₹{product.priceValue}
+                  </span>
+                  <span className="text-2xl md:text-4xl font-black text-orange-600 font-sans">
+                    ₹{Math.round(product.priceValue * (1 - product.discount / 100))}
+                  </span>
+                  <span className="text-xs px-2.5 py-1 bg-orange-100 text-orange-600 rounded-lg font-black uppercase tracking-wider">
+                    {product.discount}% OFF
+                  </span>
+                </div>
+              ) : (
+                <p className="text-2xl md:text-3xl font-black text-blue-600 font-sans">
+                  {product.priceDisplay}
+                </p>
+              )}
             </div>
 
             <div className="h-px bg-slate-100 w-full" />

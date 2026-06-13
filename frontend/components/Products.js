@@ -67,7 +67,18 @@ const Products = () => {
                   <h3 className="text-lg font-[family-name:var(--font-climate-crisis)] uppercase text-blue-950 leading-tight group-hover:text-orange-500 transition-colors">
                     {prod.name}
                   </h3>
-                  <p className="text-lg font-black text-slate-400 font-sans">{prod.priceDisplay}</p>
+                  {prod.discount > 0 ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm line-through text-slate-300 font-sans">
+                        ₹{prod.priceValue}
+                      </span>
+                      <span className="text-lg font-black text-orange-600 font-sans">
+                        ₹{Math.round(prod.priceValue * (1 - prod.discount / 100))}
+                      </span>
+                    </div>
+                  ) : (
+                    <p className="text-lg font-black text-blue-600 font-sans">{prod.priceDisplay}</p>
+                  )}
                 </div>
               </Link>
             ))}

@@ -38,6 +38,9 @@ const Navbar = () => {
         <nav className="hidden md:flex items-center gap-8 text-sm font-semibold text-slate-500">
           <Link href="/shop" className="hover:text-orange-500 transition-colors">Shop</Link>
           <Link href="/contact" className="hover:text-orange-500 transition-colors">Contact</Link>
+          {isAuthenticated && user?.is_superuser && (
+            <Link href="/admin/dashboard" className="text-indigo-600 hover:text-indigo-800 font-bold transition-colors">Admin Dashboard</Link>
+          )}
           
           {isAuthenticated ? (
              <div className="relative">
@@ -135,6 +138,9 @@ const Navbar = () => {
               <Link href="/shop" onClick={() => setIsMenuOpen(false)} className="px-4 py-2 hover:bg-orange-50 rounded-2xl transition-all">Shop</Link>
               <Link href="/orders" onClick={() => setIsMenuOpen(false)} className="px-4 py-2 hover:bg-orange-50 rounded-2xl transition-all">My Order</Link>
               <Link href="/contact" onClick={() => setIsMenuOpen(false)} className="px-4 py-2 hover:bg-orange-50 rounded-2xl transition-all">Contact</Link>
+              {isAuthenticated && user?.is_superuser && (
+                <Link href="/admin/dashboard" onClick={() => setIsMenuOpen(false)} className="px-4 py-2 text-indigo-600 hover:bg-indigo-50 rounded-2xl transition-all">Admin Dashboard</Link>
+              )}
               
               {!isAuthenticated ? (
                 <Link 

@@ -91,7 +91,7 @@ const CartSheet = () => {
                                                     <h3 className="text-[11px] md:text-[13px] font-[family-name:var(--font-climate-crisis)] uppercase text-blue-950 leading-tight">
                                                         {item.name}
                                                     </h3>
-                                                    <span className="text-xs md:text-sm font-black text-blue-600">₹{item.price}</span>
+                                                    <span className="text-xs md:text-sm font-black text-blue-600">₹{item.priceValue ?? item.price}</span>
                                                 </div>
 
                                                 <div className="flex items-center justify-between mt-2">
