@@ -13,6 +13,30 @@ import * as server from './serverActions';
 export const API_BASE = "";
 export const MEDIA_BASE = "";
 
+// ── Client-side memory cache ──
+// Speeds up back/forward navigation (e.g. shop → product → back to shop):
+// serves the previous result instantly instead of re-calling the server
+// action, then silently revalidates in the background if the entry is stale.
+// Lives only for the current browser session (cleared on hard reload).
+const clientCache = new Map();
+const CLIENT_CACHE_TTL_MS = 60_000;
+
+function withClientCache(key, fetcher) {
+  const cached = clientCache.get(key);
+  if (cached) {
+    if (Date.now() - cached.time < CLIENT_CACHE_TTL_MS) {
+      return Promise.resolve(cached.value);
+    }
+    // Stale: return it immediately, refresh in the background for next time.
+    fetcher().then((value) => clientCache.set(key, { value, time: Date.now() })).catch(() => {});
+    return Promise.resolve(cached.value);
+  }
+  return fetcher().then((value) => {
+    clientCache.set(key, { value, time: Date.now() });
+    return value;
+  });
+}
+
 // ── Normalization Helpers ──
 
 function resolveImageUrl(val) {
@@ -110,9 +134,11 @@ export function normalizePayment(p) {
 // ── Wrapper API Calls calling Server Actions ──
 
 export async function getCategories() {
-  const data = await server.getCategories();
-  const results = data?.results ?? [];
-  return results.map(normalizeCategory);
+  return withClientCache('categories', async () => {
+    const data = await server.getCategories();
+    const results = data?.results ?? [];
+    return results.map(normalizeCategory);
+  });
 }
 
 export async function createAdminCategory(categoryData) {
@@ -143,16 +169,20 @@ export async function submitTestimonial(payload) {
 }
 
 export async function getProducts(params = {}) {
-  const data = await server.getProducts(params);
-  const results = data?.results ?? [];
-  return {
-    results: results.map(normalizeProduct)
-  };
+  return withClientCache(`products:${JSON.stringify(params)}`, async () => {
+    const data = await server.getProducts(params);
+    const results = data?.results ?? [];
+    return {
+      results: results.map(normalizeProduct)
+    };
+  });
 }
 
 export async function getProduct(id) {
-  const data = await server.getProduct(id);
-  return normalizeProduct(data);
+  return withClientCache(`product:${id}`, async () => {
+    const data = await server.getProduct(id);
+    return normalizeProduct(data);
+  });
 }
 
 export async function createOrder(payload) {

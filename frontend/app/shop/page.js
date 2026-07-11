@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { getProducts, getCategories, normalizeProduct } from '../../lib/api';
 
 // ── Skeleton card shown while loading ─────────────────────────────────────
@@ -17,9 +18,11 @@ const SkeletonCard = () => (
   </div>
 );
 
-// ── Main component ─────────────────────────────────────────────────────────
-const ShopPage = () => {
-  const [selectedCategory, setSelectedCategory] = useState('all');
+// ── Main content ────────────────────────────────────────────────────────────
+const ShopPageContent = () => {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [selectedCategory, setSelectedCategory] = useState(() => searchParams.get('category_id') || 'all');
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -34,6 +37,18 @@ const ShopPage = () => {
       .then(setCategories)
       .catch(() => setCategories([]));
   }, []);
+
+  // Keep selectedCategory in sync when the URL's ?category_id changes
+  // (e.g. navigating here from a category link while already on /shop, or using browser back/forward)
+  useEffect(() => {
+    setSelectedCategory(searchParams.get('category_id') || 'all');
+  }, [searchParams]);
+
+  const handleSelectCategory = (categoryId) => {
+    setSelectedCategory(categoryId);
+    const query = categoryId === 'all' ? '' : `?category_id=${categoryId}`;
+    router.push(`/shop${query}`, { scroll: false });
+  };
 
   // Re-fetch products locally or from server
   const fetchProducts = useCallback(async (isLoadMore = false) => {
@@ -101,7 +116,7 @@ const ShopPage = () => {
         <div className="flex flex-wrap justify-center gap-3 mb-16 px-4">
           <button
             key="category-all"
-            onClick={() => setSelectedCategory('all')}
+            onClick={() => handleSelectCategory('all')}
             className={`px-8 py-3 rounded-full text-sm font-black uppercase tracking-widest transition-all duration-300 ${
               selectedCategory === 'all'
                 ? 'bg-orange-500 text-white shadow-xl shadow-orange-100 -translate-y-1'
@@ -113,7 +128,7 @@ const ShopPage = () => {
           {categories.map((cat) => (
             <button
               key={cat.id}
-              onClick={() => setSelectedCategory(cat.id)}
+              onClick={() => handleSelectCategory(cat.id)}
               className={`px-8 py-3 rounded-full text-sm font-black uppercase tracking-widest transition-all duration-300 ${
                 selectedCategory === cat.id
                   ? 'bg-orange-500 text-white shadow-xl shadow-orange-100 -translate-y-1'
@@ -267,5 +282,23 @@ const ShopPage = () => {
     </div>
   );
 };
+
+const ShopPageFallback = () => (
+  <div className="min-h-screen bg-slate-50 flex flex-col">
+    <Navbar />
+    <main className="flex-grow w-full max-w-7xl mx-auto px-4 py-12 md:py-20">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-8 gap-y-12">
+        {Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)}
+      </div>
+    </main>
+    <Footer />
+  </div>
+);
+
+const ShopPage = () => (
+  <Suspense fallback={<ShopPageFallback />}>
+    <ShopPageContent />
+  </Suspense>
+);
 
 export default ShopPage;

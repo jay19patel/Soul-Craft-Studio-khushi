@@ -11,7 +11,7 @@ import Link from 'next/link';
 import { createOrder, uploadScreenshot, getAddresses, getContacts } from '../../lib/api';
 
 const CheckoutPage = () => {
-  const { cart, cartTotal, clearCart, cartId } = useCart();
+  const { cart, cartTotal, clearCart, cartId, isReady: cartReady } = useCart();
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -187,6 +187,21 @@ const CheckoutPage = () => {
       setIsSubmitting(false);
     }
   };
+
+  // Wait for the cart to finish loading from the server before rendering
+  // anything cart-dependent — otherwise cartTotal/prices briefly show ₹0
+  // while the initial fetchActiveCart() request is still in flight.
+  if (authLoading || !cartReady) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col">
+        <Navbar />
+        <main className="flex-grow flex items-center justify-center p-6">
+          <div className="w-10 h-10 border-4 border-blue-600/30 border-t-blue-600 rounded-full animate-spin" />
+        </main>
+        <Footer />
+      </div>
+    );
+  }
 
   // Empty cart guard (skip while redirecting away after a successful order,
   // since clearCart() empties the cart before router.push takes effect)

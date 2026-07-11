@@ -13,17 +13,22 @@ const CartContext = createContext();
  */
 function normaliseCartProduct(product) {
   const catalogProductId = String(product.id ?? product._id ?? '');
+  const rawPrice =
+    product.price_value ??
+    product.priceValue ??
+    parseFloat(String(product.price ?? "0").replace(/[^\d.]/g, "")) ??
+    0;
+  // Apply discount client-side so the cart total is correct immediately —
+  // otherwise it only reflects the discount after the next server cart sync.
+  const discount = Number(product.discount || 0);
+  const effectivePrice = discount > 0 ? Math.round(rawPrice * (1 - discount / 100)) : rawPrice;
   return {
     ...product,
     id: catalogProductId,
     // Image: prefer explicit image field, fall back to img (API), then null
     image: product.image || product.img || null,
-    // Numeric price for arithmetic: prefer price_value, then parse price string
-    priceValue:
-      product.price_value ??
-      product.priceValue ??
-      parseFloat(String(product.price ?? "0").replace(/[^\d.]/g, "")) ??
-      0,
+    // Numeric price for arithmetic, discount already applied
+    priceValue: effectivePrice,
   };
 }
 
@@ -251,6 +256,7 @@ export const CartProvider = ({ children }) => {
         cartCount,
         cartTotal,
         setIsCartOpen,
+        isReady,
       }}
     >
       {children}

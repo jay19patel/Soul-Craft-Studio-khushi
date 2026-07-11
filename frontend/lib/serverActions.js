@@ -1,6 +1,7 @@
 "use server";
 
 import { cookies } from 'next/headers';
+import { unstable_cache, revalidateTag } from 'next/cache';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -77,36 +78,44 @@ export async function getAuthenticatedUser() {
 
 // ── CATALOG FUNCTIONS ──
 
+const getCategoriesCached = unstable_cache(
+  async () => {
+    const db = await getDb();
+    const categories = await db.collection('categories').find().toArray();
+
+    const categoryMap = {};
+    categories.forEach(c => {
+      const idStr = c._id.toString();
+      categoryMap[idStr] = {
+        id: idStr,
+        name: c.name,
+        slug: c.slug,
+        description: c.description,
+        parent: c.parent_id ? String(c.parent_id) : null,
+        image_url: c.image_url,
+        created_at: c.created_at,
+        updated_at: c.updated_at,
+        children: []
+      };
+    });
+
+    const rootCategories = [];
+    Object.values(categoryMap).forEach(c => {
+      if (c.parent === null || c.parent === undefined || c.parent === '') {
+        rootCategories.push(c);
+      } else if (categoryMap[c.parent]) {
+        categoryMap[c.parent].children.push(c);
+      }
+    });
+
+    return { results: rootCategories };
+  },
+  ['categories-list'],
+  { tags: ['categories'], revalidate: 60 }
+);
+
 export async function getCategories() {
-  const db = await getDb();
-  const categories = await db.collection('categories').find().toArray();
-  
-  const categoryMap = {};
-  categories.forEach(c => {
-    const idStr = c._id.toString();
-    categoryMap[idStr] = {
-      id: idStr,
-      name: c.name,
-      slug: c.slug,
-      description: c.description,
-      parent: c.parent_id ? String(c.parent_id) : null,
-      image_url: c.image_url,
-      created_at: c.created_at,
-      updated_at: c.updated_at,
-      children: []
-    };
-  });
-  
-  const rootCategories = [];
-  Object.values(categoryMap).forEach(c => {
-    if (c.parent === null || c.parent === undefined || c.parent === '') {
-      rootCategories.push(c);
-    } else if (categoryMap[c.parent]) {
-      categoryMap[c.parent].children.push(c);
-    }
-  });
-  
-  return { results: rootCategories };
+  return getCategoriesCached();
 }
 
 export async function createAdminCategory(categoryData) {
@@ -164,6 +173,7 @@ export async function createAdminCategory(categoryData) {
   };
   
   await db.collection('categories').insertOne(newCategory);
+  revalidateTag('categories');
   return { id: nextId, ...newCategory };
 }
 
@@ -208,7 +218,9 @@ export async function updateAdminCategory(id, categoryData) {
   updates.updated_at = now;
   
   await db.collection('categories').updateOne(getQueryById(id), { $set: updates });
-  
+  revalidateTag('categories');
+  revalidateTag('products'); // category name/image may be embedded in cached product listings
+
   const updated = await db.collection('categories').findOne(getQueryById(id));
   return { id: updated._id.toString(), ...updated };
 }
@@ -226,6 +238,8 @@ export async function deleteAdminCategory(id) {
   );
   
   await db.collection('categories').deleteOne(getQueryById(id));
+  revalidateTag('categories');
+  revalidateTag('products');
   return { success: true };
 }
 
@@ -285,7 +299,8 @@ export async function submitTestimonial(payload) {
   return { id: result.insertedId.toString(), content, rating };
 }
 
-export async function getProducts(params = {}) {
+const getProductsCached = unstable_cache(
+  async (params = {}) => {
   const db = await getDb();
   const query = { is_active: true };
   
@@ -364,8 +379,15 @@ export async function getProducts(params = {}) {
   if (!params.include_out_of_stock) {
     finalProducts = enrichedProducts.filter(p => p.stock > 0);
   }
-  
+
   return { results: finalProducts };
+  },
+  ['products-list'],
+  { tags: ['products'], revalidate: 30 }
+);
+
+export async function getProducts(params = {}) {
+  return getProductsCached(params);
 }
 
 export async function getProduct(id) {
@@ -786,9 +808,10 @@ export async function createOrder(payload) {
         { _id: p._id, "variants.id": variant.id },
         { $set: { "variants.$.stock": newStock } }
       );
+      revalidateTag('products');
     }
   }
-  
+
   const orderDoc = {
     _id: orderId,
     status: payload.status || 'PENDING',
@@ -1475,6 +1498,7 @@ export async function createAdminProduct(productData) {
   };
   
   const result = await db.collection('products').insertOne(newProduct);
+  revalidateTag('products');
   return getProduct(result.insertedId.toString());
 }
 
@@ -1567,15 +1591,17 @@ export async function updateAdminProduct(id, productData) {
   }
   
   await db.collection('products').updateOne(getQueryById(id), { $set: updates });
+  revalidateTag('products');
   return getProduct(id);
 }
 
 export async function deleteAdminProduct(id) {
   const user = await getAuthenticatedUser();
   if (!user || !user.is_superuser) throw new Error('Unauthorized');
-  
+
   const db = await getDb();
   await db.collection('products').deleteOne(getQueryById(id));
+  revalidateTag('products');
   return { success: true };
 }
 
