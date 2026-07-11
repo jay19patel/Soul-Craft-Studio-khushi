@@ -27,7 +27,9 @@ export default function AdminProductsPage() {
     description: '',
     price: '',
     category: '',
-    is_active: true
+    is_active: true,
+    stock: 20,
+    discount: ''
   });
 
   // Category Management State
@@ -92,11 +94,13 @@ export default function AdminProductsPage() {
         price: product.priceValue || product.price || '',
         category: product.category?.id || product.category_id || '',
         is_active: product.is_active !== undefined ? !!product.is_active : true,
+        stock: product.stock ?? 0,
+        discount: product.discount || '',
         image: null,
       });
     } else {
       setEditingProduct(null);
-      setFormData({ name: '', slug: '', description: '', price: '', category: '', is_active: true, image: null });
+      setFormData({ name: '', slug: '', description: '', price: '', category: '', is_active: true, stock: 20, discount: '', image: null });
     }
     setIsModalOpen(true);
   };
@@ -117,6 +121,7 @@ export default function AdminProductsPage() {
       submitData.append('description', formData.description);
       submitData.append('price', formData.price);
       submitData.append('base_price', formData.price);
+      submitData.append('discount', formData.discount || '0');
       submitData.append('is_active', formData.is_active ? 'true' : 'false');
       if (formData.category) {
         submitData.append('category_id', formData.category);
@@ -124,6 +129,12 @@ export default function AdminProductsPage() {
       if (formData.image) {
         submitData.append('image', formData.image);
       }
+
+      const existingVariants = editingProduct?.variants || [];
+      const variantsPayload = existingVariants.length > 0
+        ? [{ ...existingVariants[0], stock: Number(formData.stock) || 0 }]
+        : [{ stock: Number(formData.stock) || 0 }];
+      submitData.append('variants', JSON.stringify(variantsPayload));
 
       if (editingProduct) {
         await updateAdminProduct(editingProduct.id, submitData);
@@ -386,15 +397,42 @@ export default function AdminProductsPage() {
                 />
               </div>
 
-              <div className="flex flex-col gap-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Price (₹)</label>
-                <input 
-                  type="number" 
-                  required
-                  value={formData.price}
-                  onChange={(e) => setFormData({...formData, price: e.target.value})}
-                  className="w-full bg-slate-50 border-none rounded-xl py-3 px-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
-                />
+              <div className="grid grid-cols-3 gap-4">
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Price (₹)</label>
+                  <input
+                    type="number"
+                    required
+                    value={formData.price}
+                    onChange={(e) => setFormData({...formData, price: e.target.value})}
+                    className="w-full bg-slate-50 border-none rounded-xl py-3 px-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Quantity</label>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={formData.stock}
+                    onChange={(e) => setFormData({...formData, stock: e.target.value})}
+                    className="w-full bg-slate-50 border-none rounded-xl py-3 px-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Discount (%)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={formData.discount}
+                    onChange={(e) => setFormData({...formData, discount: e.target.value})}
+                    placeholder="0"
+                    className="w-full bg-slate-50 border-none rounded-xl py-3 px-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                </div>
               </div>
 
               <div className="flex flex-col gap-2">
