@@ -5,12 +5,15 @@ import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import Link from 'next/link';
 import { useAuth } from '../../context/AuthContext';
-import { getOrders, normalizeOrder } from '../../lib/api';
+import { getOrders } from '../../lib/api';
+import { getPaginationRange } from '../../lib/pagination';
 import { useRouter } from 'next/navigation';
-import { 
-  Package, Truck, CheckCircle, Clock, ChevronRight, 
-  ShoppingBag, Search, X, AlertCircle 
+import {
+  Package, Truck, CheckCircle, Clock, ChevronRight, ChevronLeft,
+  ShoppingBag, Search, X, AlertCircle, Loader2
 } from 'lucide-react';
+
+const ORDERS_PAGE_SIZE = 10;
 
 // ── Status helpers ─────────────────────────────────────────────────────────
 const STATUS_CONFIG = {
@@ -38,17 +41,24 @@ const MyOrdersPage = () => {
   
   const [email, setEmail] = useState('');
   const [orders, setOrders] = useState([]);
+  const [ordersTotal, setOrdersTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [loadingPage, setLoadingPage] = useState(false);
   const [searched, setSearched] = useState(false);
   const [error, setError] = useState(null);
+  const [lastEmail, setLastEmail] = useState(null);
 
   // Define fetch handler
   const fetchOrders = useCallback(async (targetEmail = null) => {
     setLoading(true);
     setError(null);
     try {
-      const raw = await getOrders(targetEmail);
-      setOrders(raw.map(normalizeOrder));
+      const data = await getOrders(targetEmail, { page: 1, page_size: ORDERS_PAGE_SIZE });
+      setOrders(data.results);
+      setOrdersTotal(data.total);
+      setPage(1);
+      setLastEmail(targetEmail);
       setSearched(true);
     } catch (err) {
       setError(err.message || 'Failed to load orders.');
@@ -57,6 +67,21 @@ const MyOrdersPage = () => {
       setLoading(false);
     }
   }, []);
+
+  const goToPage = async (pageNum) => {
+    if (loadingPage) return;
+    setLoadingPage(true);
+    try {
+      const data = await getOrders(lastEmail, { page: pageNum, page_size: ORDERS_PAGE_SIZE });
+      setOrders(data.results);
+      setOrdersTotal(data.total);
+      setPage(pageNum);
+    } catch (err) {
+      console.error('Failed to load orders page:', err);
+    } finally {
+      setLoadingPage(false);
+    }
+  };
 
   // Automatically fetch if logged in
   useEffect(() => {
@@ -220,6 +245,46 @@ const MyOrdersPage = () => {
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+              {ordersTotal > ORDERS_PAGE_SIZE && (
+                <div className="flex justify-center items-center gap-2 pt-4 flex-wrap">
+                  <button
+                    onClick={() => goToPage(page - 1)}
+                    disabled={page <= 1 || loadingPage}
+                    className="px-5 py-3 bg-white border-2 border-slate-200 text-blue-950 rounded-full text-xs font-black uppercase tracking-widest hover:bg-slate-50 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+                  >
+                    <ChevronLeft className="w-4 h-4" /> Prev
+                  </button>
+
+                  {getPaginationRange(page, Math.ceil(ordersTotal / ORDERS_PAGE_SIZE)).map((p) =>
+                    typeof p === 'number' ? (
+                      <button
+                        key={p}
+                        onClick={() => goToPage(p)}
+                        disabled={loadingPage}
+                        className={`w-10 h-10 rounded-full text-xs font-black transition-all disabled:cursor-not-allowed ${
+                          p === page
+                            ? 'bg-blue-600 text-white shadow-lg'
+                            : 'bg-white border-2 border-slate-200 text-blue-950 hover:bg-slate-50'
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    ) : (
+                      <span key={p} className="px-1 text-slate-300 text-xs font-black">…</span>
+                    )
+                  )}
+
+                  <button
+                    onClick={() => goToPage(page + 1)}
+                    disabled={page >= Math.ceil(ordersTotal / ORDERS_PAGE_SIZE) || loadingPage}
+                    className="px-5 py-3 bg-white border-2 border-slate-200 text-blue-950 rounded-full text-xs font-black uppercase tracking-widest hover:bg-slate-50 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+                  >
+                    Next <ChevronRight className="w-4 h-4" />
+                  </button>
+
+                  {loadingPage && <Loader2 className="w-4 h-4 animate-spin text-blue-600 ml-2" />}
                 </div>
               )}
             </>

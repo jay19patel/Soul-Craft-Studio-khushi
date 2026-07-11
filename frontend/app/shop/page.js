@@ -6,6 +6,11 @@ import Footer from '../../components/Footer';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { getProducts, getCategories, normalizeProduct } from '../../lib/api';
+import { Search, X } from 'lucide-react';
+
+const SHOP_PAGE_SIZE = 20;
+const SEARCH_DEBOUNCE_MS = 450;
+const FILTER_CONTROL_CLASS = 'bg-white border border-slate-100 rounded-full py-3 text-sm text-slate-600 shadow-sm focus:ring-2 focus:ring-orange-400 outline-none transition-shadow';
 
 // ── Skeleton card shown while loading ─────────────────────────────────────
 const SkeletonCard = () => (
@@ -22,7 +27,13 @@ const SkeletonCard = () => (
 const ShopPageContent = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [selectedCategory, setSelectedCategory] = useState(() => searchParams.get('category_id') || 'all');
+
+  const selectedCategory = searchParams.get('category_id') || 'all';
+  const search = searchParams.get('search') || '';
+  const sortBy = searchParams.get('sort') || 'newest';
+  const discountOnly = searchParams.get('discount') === 'true';
+
+  const [searchInput, setSearchInput] = useState(search);
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -38,34 +49,79 @@ const ShopPageContent = () => {
       .catch(() => setCategories([]));
   }, []);
 
-  // Keep selectedCategory in sync when the URL's ?category_id changes
-  // (e.g. navigating here from a category link while already on /shop, or using browser back/forward)
+  // Keep the search input in sync when the URL changes from elsewhere
+  // (e.g. browser back/forward, or clearing filters).
   useEffect(() => {
-    setSelectedCategory(searchParams.get('category_id') || 'all');
-  }, [searchParams]);
+    setSearchInput(search);
+  }, [search]);
+
+  // Merges the given updates into the current URL query string.
+  // Passing `null`/`''`/`'all'`/`false` for a key removes it from the URL.
+  const updateQuery = useCallback((updates, { replace = false } = {}) => {
+    const next = new URLSearchParams(searchParams.toString());
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === null || value === undefined || value === '' || value === 'all' || value === false) {
+        next.delete(key);
+      } else {
+        next.set(key, value);
+      }
+    });
+    const qs = next.toString();
+    const url = `/shop${qs ? `?${qs}` : ''}`;
+    if (replace) router.replace(url, { scroll: false });
+    else router.push(url, { scroll: false });
+  }, [router, searchParams]);
 
   const handleSelectCategory = (categoryId) => {
-    setSelectedCategory(categoryId);
-    const query = categoryId === 'all' ? '' : `?category_id=${categoryId}`;
-    router.push(`/shop${query}`, { scroll: false });
+    updateQuery({ category_id: categoryId });
   };
+
+  const handleSearchChange = (value) => {
+    setSearchInput(value);
+  };
+
+  const handleClearSearch = () => {
+    setSearchInput('');
+    updateQuery({ search: null }, { replace: true });
+  };
+
+  const handleSortChange = (value) => {
+    updateQuery({ sort: value === 'newest' ? null : value });
+  };
+
+  const handleDiscountToggle = (checked) => {
+    updateQuery({ discount: checked ? 'true' : null });
+  };
+
+  // Debounce typing in the search box before it hits the URL/server.
+  useEffect(() => {
+    if (searchInput === search) return;
+    const timer = setTimeout(() => {
+      updateQuery({ search: searchInput.trim() || null }, { replace: true });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchInput]);
 
   // Re-fetch products locally or from server
   const fetchProducts = useCallback(async (isLoadMore = false) => {
     if (isLoadMore) setLoadingMore(true);
     else {
       setLoading(true);
-      setPage(1); // Reset to first page on category change
+      setPage(1); // Reset to first page on filter change
     }
     setError(null);
 
     try {
-      const params = { page: isLoadMore ? page + 1 : 1, page_size: 16 };
+      const params = { page: isLoadMore ? page + 1 : 1, page_size: SHOP_PAGE_SIZE };
       if (selectedCategory !== 'all') params.category_id = selectedCategory;
-      
+      if (search) params.search = search;
+      if (sortBy !== 'newest') params.sort_by = sortBy;
+      if (discountOnly) params.discount_only = true;
+
       const data = await getProducts(params);
       const newProducts = (data?.results ?? []).map(normalizeProduct);
-      
+
       if (isLoadMore) {
         setProducts(prev => [...prev, ...newProducts]);
         setPage(prev => prev + 1);
@@ -81,12 +137,13 @@ const ShopPageContent = () => {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [selectedCategory, page]);
+  }, [selectedCategory, search, sortBy, discountOnly, page]);
 
-  // Initial load and category switch
+  // Initial load and whenever a filter changes
   useEffect(() => {
     fetchProducts(false);
-  }, [selectedCategory]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCategory, search, sortBy, discountOnly]);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900 selection:bg-orange-200">
@@ -112,32 +169,58 @@ const ShopPageContent = () => {
           )}
         </div>
 
-        {/* Category Filters */}
-        <div className="flex flex-wrap justify-center gap-3 mb-16 px-4">
-          <button
-            key="category-all"
-            onClick={() => handleSelectCategory('all')}
-            className={`px-8 py-3 rounded-full text-sm font-black uppercase tracking-widest transition-all duration-300 ${
-              selectedCategory === 'all'
-                ? 'bg-orange-500 text-white shadow-xl shadow-orange-100 -translate-y-1'
-                : 'bg-white text-slate-600 hover:bg-orange-50 shadow-sm'
-            }`}
+        {/* Filters Toolbar — search, category, sort & discount, all in one consistent style */}
+        <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3 mb-16 px-4">
+          <div className="relative flex-grow md:max-w-sm">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              value={searchInput}
+              onChange={(e) => handleSearchChange(e.target.value)}
+              placeholder="Search by name or description..."
+              className={`w-full pl-10 pr-10 ${FILTER_CONTROL_CLASS}`}
+            />
+            {searchInput && (
+              <button
+                onClick={handleClearSearch}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-300 hover:text-slate-600 transition-colors"
+                aria-label="Clear search"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
+          <select
+            value={selectedCategory}
+            onChange={(e) => handleSelectCategory(e.target.value)}
+            className={`px-5 font-bold cursor-pointer ${FILTER_CONTROL_CLASS}`}
           >
-            All Products
-          </button>
-          {categories.map((cat) => (
-            <button
-              key={cat.id}
-              onClick={() => handleSelectCategory(cat.id)}
-              className={`px-8 py-3 rounded-full text-sm font-black uppercase tracking-widest transition-all duration-300 ${
-                selectedCategory === cat.id
-                  ? 'bg-orange-500 text-white shadow-xl shadow-orange-100 -translate-y-1'
-                  : 'bg-white text-slate-600 hover:bg-orange-50 shadow-sm'
-              }`}
-            >
-              {cat.name}
-            </button>
-          ))}
+            <option value="all">All Categories</option>
+            {categories.map((cat) => (
+              <option key={cat.id} value={cat.id}>{cat.name}</option>
+            ))}
+          </select>
+
+          <select
+            value={sortBy}
+            onChange={(e) => handleSortChange(e.target.value)}
+            className={`px-5 font-bold cursor-pointer ${FILTER_CONTROL_CLASS}`}
+          >
+            <option value="newest">Newest First</option>
+            <option value="price_asc">Price: Low to High</option>
+            <option value="price_desc">Price: High to Low</option>
+          </select>
+
+          <label className={`flex items-center gap-2 px-5 font-bold cursor-pointer whitespace-nowrap ${FILTER_CONTROL_CLASS}`}>
+            <input
+              type="checkbox"
+              checked={discountOnly}
+              onChange={(e) => handleDiscountToggle(e.target.checked)}
+              className="w-4 h-4 rounded text-orange-500 focus:ring-orange-400"
+            />
+            Discounted Only
+          </label>
         </div>
 
         {/* Error state */}
@@ -273,7 +356,11 @@ const ShopPageContent = () => {
               </svg>
             </div>
             <h3 className="text-xl font-bold text-slate-800 mb-2">No products found</h3>
-            <p className="text-slate-500">We couldn&apos;t find any products in this category.</p>
+            <p className="text-slate-500">
+              {search
+                ? <>We couldn&apos;t find any products matching &ldquo;{search}&rdquo;.</>
+                : "We couldn't find any products matching these filters."}
+            </p>
           </div>
         )}
       </main>

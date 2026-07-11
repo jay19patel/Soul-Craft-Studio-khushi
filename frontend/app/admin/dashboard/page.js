@@ -5,43 +5,49 @@ import Navbar from '../../../components/Navbar';
 import Footer from '../../../components/Footer';
 import { useAuth } from '../../../context/AuthContext';
 import { useRouter } from 'next/navigation';
-import { 
-  getAdminStats, 
-  getAdminOrders, 
-  updateAdminOrder, 
-  getAdminUsers, 
-  getAdminCarts, 
-  getAdminEmailLogs 
+import {
+  getAdminStats,
+  getAdminOrders,
+  updateAdminOrder,
+  deleteAdminOrder,
+  getAdminUsers,
+  getAdminCarts,
+  getAdminEmailLogs
 } from '../../../lib/api';
-import { 
-  Package, 
-  ShoppingBag, 
-  Banknote, 
-  Clock, 
-  ChevronLeft, 
-  Loader2, 
-  Search, 
-  ExternalLink, 
-  Image as ImageIcon, 
-  Mail, 
-  FileText, 
-  User, 
-  ShoppingCart, 
-  Send, 
-  AlertTriangle 
+import {
+  Package,
+  ShoppingBag,
+  Banknote,
+  Clock,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+  Search,
+  ExternalLink,
+  Image as ImageIcon,
+  Mail,
+  FileText,
+  User,
+  ShoppingCart,
+  Send,
+  AlertTriangle,
+  Trash2
 } from 'lucide-react';
 import Link from 'next/link';
-import { 
-  ResponsiveContainer, 
-  ComposedChart, 
-  Area, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  Tooltip, 
+import {
+  ResponsiveContainer,
+  ComposedChart,
+  Area,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
   CartesianGrid,
   Legend
 } from 'recharts';
+import { getPaginationRange } from '../../../lib/pagination';
+
+const ORDERS_PAGE_SIZE = 10;
 
 export default function AdminDashboardPage() {
   const { user, isAuthenticated, loading: authLoading } = useAuth();
@@ -49,6 +55,11 @@ export default function AdminDashboardPage() {
 
   const [stats, setStats] = useState(null);
   const [orders, setOrders] = useState([]);
+  const [ordersTotal, setOrdersTotal] = useState(0);
+  const [ordersPage, setOrdersPage] = useState(1);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('');
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState('');
   const [users, setUsers] = useState([]);
   const [carts, setCarts] = useState([]);
   const [emailLogs, setEmailLogs] = useState([]);
@@ -59,6 +70,8 @@ export default function AdminDashboardPage() {
   const [updating, setUpdating] = useState(null);
   const [chartRange, setChartRange] = useState('7d'); // 7d, 1m, 1y, all
   const [isMounted, setIsMounted] = useState(false);
+  const [orderToDelete, setOrderToDelete] = useState(null);
+  const [deletingOrderId, setDeletingOrderId] = useState(null);
 
   useEffect(() => {
     setIsMounted(true);
@@ -84,13 +97,15 @@ export default function AdminDashboardPage() {
     try {
       const [statsData, ordersData, usersData, cartsData, logsData] = await Promise.all([
         getAdminStats(chartRange),
-        getAdminOrders(),
+        getAdminOrders({ page: 1, page_size: ORDERS_PAGE_SIZE }),
         getAdminUsers(),
         getAdminCarts(),
         getAdminEmailLogs()
       ]);
       setStats(statsData);
-      setOrders(ordersData);
+      setOrders(ordersData.results);
+      setOrdersTotal(ordersData.total);
+      setOrdersPage(1);
       setUsers(usersData);
       setCarts(cartsData);
       setEmailLogs(logsData);
@@ -99,6 +114,55 @@ export default function AdminDashboardPage() {
       setError('Failed to load admin data');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchOrdersPage = async (pageNum, overrides = {}) => {
+    setLoadingOrders(true);
+    try {
+      const status = overrides.status !== undefined ? overrides.status : statusFilter;
+      const paymentStatus = overrides.paymentStatus !== undefined ? overrides.paymentStatus : paymentStatusFilter;
+      const data = await getAdminOrders({
+        page: pageNum,
+        page_size: ORDERS_PAGE_SIZE,
+        status: status || undefined,
+        payment_status: paymentStatus || undefined
+      });
+      setOrders(data.results);
+      setOrdersTotal(data.total);
+      setOrdersPage(pageNum);
+    } catch (err) {
+      console.error('Failed to load orders page:', err);
+    } finally {
+      setLoadingOrders(false);
+    }
+  };
+
+  const handleStatusFilterChange = (value) => {
+    setStatusFilter(value);
+    fetchOrdersPage(1, { status: value });
+  };
+
+  const handlePaymentStatusFilterChange = (value) => {
+    setPaymentStatusFilter(value);
+    fetchOrdersPage(1, { paymentStatus: value });
+  };
+
+  const handleDeleteOrder = async () => {
+    if (!orderToDelete || deletingOrderId) return;
+    const id = orderToDelete;
+    setDeletingOrderId(id);
+    try {
+      await deleteAdminOrder(id);
+      setOrderToDelete(null);
+      // If that was the last order on a page beyond the first, step back one page.
+      const nextPage = orders.length === 1 && ordersPage > 1 ? ordersPage - 1 : ordersPage;
+      await fetchOrdersPage(nextPage);
+    } catch (err) {
+      console.error('Failed to delete order:', err);
+      alert('Failed to delete order: ' + err.message);
+    } finally {
+      setDeletingOrderId(null);
     }
   };
 
@@ -351,7 +415,7 @@ export default function AdminDashboardPage() {
                   onClick={() => { setActiveTab('orders'); setSearchTerm(''); }} 
                   className={`px-5 py-3 rounded-full transition-all flex items-center gap-2 ${activeTab === 'orders' ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}
                 >
-                  <ShoppingBag className="w-3.5 h-3.5" /> Orders ({orders.length})
+                  <ShoppingBag className="w-3.5 h-3.5" /> Orders ({ordersTotal})
                 </button>
                 <button 
                   onClick={() => { setActiveTab('users'); setSearchTerm(''); }} 
@@ -373,20 +437,49 @@ export default function AdminDashboardPage() {
                 </button>
               </div>
 
-              <div className="relative w-full lg:w-80">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input 
-                  type="text" 
-                  placeholder={
-                    activeTab === 'orders' ? "Search by Order ID, name..." :
-                    activeTab === 'users' ? "Search by email, name..." :
-                    activeTab === 'carts' ? "Search by email, name..." :
-                    "Search email logs..."
-                  }
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full bg-slate-50 border-none rounded-2xl py-3 pl-10 pr-4 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                />
+              <div className="flex flex-col sm:flex-row items-stretch gap-3 w-full lg:w-auto">
+                {activeTab === 'orders' && (
+                  <>
+                    <select
+                      value={paymentStatusFilter}
+                      onChange={(e) => handlePaymentStatusFilterChange(e.target.value)}
+                      className="bg-slate-50 border-none rounded-2xl py-3 px-4 text-xs font-bold text-slate-600 focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
+                    >
+                      <option value="">All Payment Status</option>
+                      <option value="PENDING">Pending</option>
+                      <option value="RECEIVED">Received</option>
+                      <option value="VERIFIED">Verified</option>
+                      <option value="FAILED">Failed</option>
+                    </select>
+                    <select
+                      value={statusFilter}
+                      onChange={(e) => handleStatusFilterChange(e.target.value)}
+                      className="bg-slate-50 border-none rounded-2xl py-3 px-4 text-xs font-bold text-slate-600 focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
+                    >
+                      <option value="">All Order Status</option>
+                      <option value="PENDING">Pending</option>
+                      <option value="PROCESSING">Processing</option>
+                      <option value="SHIPPED">Shipped</option>
+                      <option value="DELIVERED">Delivered</option>
+                      <option value="CANCELLED">Cancelled</option>
+                    </select>
+                  </>
+                )}
+                <div className="relative w-full lg:w-80">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder={
+                      activeTab === 'orders' ? "Search by Order ID, name..." :
+                      activeTab === 'users' ? "Search by email, name..." :
+                      activeTab === 'carts' ? "Search by email, name..." :
+                      "Search email logs..."
+                    }
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full bg-slate-50 border-none rounded-2xl py-3 pl-10 pr-4 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                </div>
               </div>
 
             </div>
@@ -403,12 +496,13 @@ export default function AdminDashboardPage() {
                       <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Payment Status</th>
                       <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Order Status</th>
                       <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Invoice</th>
+                      <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400 text-right pr-4">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
                     {filteredOrders.length === 0 ? (
                       <tr>
-                        <td colSpan="6" className="py-8 text-center text-slate-500 text-sm">No orders found.</td>
+                        <td colSpan="7" className="py-8 text-center text-slate-500 text-sm">No orders found.</td>
                       </tr>
                     ) : filteredOrders.map((order) => (
                       <tr key={order.id} className="hover:bg-slate-50/50 transition-colors group">
@@ -491,10 +585,60 @@ export default function AdminDashboardPage() {
                             <FileText className="w-3.5 h-3.5" /> Invoice
                           </Link>
                         </td>
+                        <td className="py-6 pr-4 align-top text-right">
+                          <button
+                            onClick={() => setOrderToDelete(order.id)}
+                            disabled={deletingOrderId === order.id}
+                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            title="Delete order"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                {!searchTerm && ordersTotal > ORDERS_PAGE_SIZE && (
+                  <div className="flex justify-center items-center gap-2 pt-8 flex-wrap">
+                    <button
+                      onClick={() => fetchOrdersPage(ordersPage - 1)}
+                      disabled={ordersPage <= 1 || loadingOrders}
+                      className="px-4 py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-full text-xs font-black uppercase tracking-widest transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+                    >
+                      <ChevronLeft className="w-4 h-4" /> Prev
+                    </button>
+
+                    {getPaginationRange(ordersPage, Math.ceil(ordersTotal / ORDERS_PAGE_SIZE)).map((p) =>
+                      typeof p === 'number' ? (
+                        <button
+                          key={p}
+                          onClick={() => fetchOrdersPage(p)}
+                          disabled={loadingOrders}
+                          className={`w-9 h-9 rounded-full text-xs font-black transition-all disabled:cursor-not-allowed ${
+                            p === ordersPage
+                              ? 'bg-indigo-600 text-white shadow-lg'
+                              : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      ) : (
+                        <span key={p} className="px-1 text-slate-300 text-xs font-black">…</span>
+                      )
+                    )}
+
+                    <button
+                      onClick={() => fetchOrdersPage(ordersPage + 1)}
+                      disabled={ordersPage >= Math.ceil(ordersTotal / ORDERS_PAGE_SIZE) || loadingOrders}
+                      className="px-4 py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-full text-xs font-black uppercase tracking-widest transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+                    >
+                      Next <ChevronRight className="w-4 h-4" />
+                    </button>
+
+                    {loadingOrders && <Loader2 className="w-4 h-4 animate-spin text-indigo-600 ml-2" />}
+                  </div>
+                )}
               </div>
             )}
 
@@ -656,7 +800,42 @@ export default function AdminDashboardPage() {
 
         </div>
       </main>
-      
+
+      {/* Delete Order Confirmation Dialog */}
+      {orderToDelete && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-[32px] w-full max-w-sm shadow-2xl p-8 flex flex-col gap-6">
+            <div className="flex flex-col gap-2">
+              <div className="w-12 h-12 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <h3 className="text-xl font-black text-blue-950">Delete this order?</h3>
+              <p className="text-sm text-slate-500">
+                Order <span className="font-mono font-bold text-slate-700">#{orderToDelete}</span> and its payment records will be permanently deleted. This cannot be undone.
+              </p>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setOrderToDelete(null)}
+                disabled={deletingOrderId === orderToDelete}
+                className="px-5 py-3 rounded-xl text-xs font-black uppercase tracking-widest text-slate-500 hover:bg-slate-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteOrder}
+                disabled={deletingOrderId === orderToDelete}
+                className="px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {deletingOrderId === orderToDelete ? 'Deleting...' : 'Delete Order'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Footer />
     </div>
   );

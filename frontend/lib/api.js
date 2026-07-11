@@ -259,7 +259,10 @@ export async function getMyOrders(params = {}) {
 export async function getOrders(email = null, params = {}) {
   const data = await server.getOrders(email, params);
   const results = data?.results ?? [];
-  return results.map(normalizeOrder);
+  return {
+    results: results.map(normalizeOrder),
+    total: data?.total ?? results.length
+  };
 }
 
 export async function register(data) {
@@ -341,14 +344,22 @@ export async function getAdminStats(range = '7d') {
   return await server.getAdminStats(range);
 }
 
-export async function getAdminOrders() {
-  const orders = await server.getAdminOrders();
-  return orders.map(normalizeOrder);
+export async function getAdminOrders(params = {}) {
+  const data = await server.getAdminOrders(params);
+  const results = data?.results ?? [];
+  return {
+    results: results.map(normalizeOrder),
+    total: data?.total ?? results.length
+  };
 }
 
 export async function getAdminOrder(id) {
   const order = await server.getAdminOrder(id);
   return normalizeOrder(order);
+}
+
+export async function deleteAdminOrder(id) {
+  return await server.deleteAdminOrder(id);
 }
 
 export async function updateAdminOrder(id, payload) {

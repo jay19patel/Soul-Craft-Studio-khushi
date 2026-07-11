@@ -37,6 +37,10 @@ function stripHtml(html) {
   return html.replace(/<[^>]*>/g, '').trim();
 }
 
+function escapeRegExp(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * Returns a query object for MongoDB matching _id as string or ObjectId.
  */
@@ -319,9 +323,10 @@ const getProductsCached = unstable_cache(
   }
   
   if (params.search) {
+    const safeSearch = escapeRegExp(String(params.search));
     query.$or = [
-      { name: { $regex: params.search, $options: 'i' } },
-      { description: { $regex: params.search, $options: 'i' } }
+      { name: { $regex: safeSearch, $options: 'i' } },
+      { description: { $regex: safeSearch, $options: 'i' } }
     ];
   }
   
@@ -377,8 +382,19 @@ const getProductsCached = unstable_cache(
   // Exclude out-of-stock products unless specifically requested (e.g. by admin)
   let finalProducts = enrichedProducts;
   if (!params.include_out_of_stock) {
-    finalProducts = enrichedProducts.filter(p => p.stock > 0);
+    finalProducts = finalProducts.filter(p => p.stock > 0);
   }
+
+  if (params.discount_only) {
+    finalProducts = finalProducts.filter(p => p.discount > 0);
+  }
+
+  if (params.sort_by === 'price_asc') {
+    finalProducts = [...finalProducts].sort((a, b) => a.price_value - b.price_value);
+  } else if (params.sort_by === 'price_desc') {
+    finalProducts = [...finalProducts].sort((a, b) => b.price_value - a.price_value);
+  }
+  // else: keep the default created_at-desc order from the Mongo query above.
 
   const total = finalProducts.length;
   // Paginate after the stock filter so page boundaries reflect what's actually shown.
@@ -986,25 +1002,36 @@ export async function getMyOrders(params = {}) {
 
 export async function getOrders(email = null, params = {}) {
   const user = await getAuthenticatedUser();
-  if (!user) return [];
-  
+  if (!user) return { results: [], total: 0 };
+
   const db = await getDb();
   const query = {};
-  
+
   if (!user.is_superuser) {
     query.user_id = user.id;
   } else if (email) {
     query.customer_email = email;
   }
-  
-  const orders = await db.collection('orders').find(query).sort({ created_at: -1 }).toArray();
-  
+
+  if (params.status) query.status = params.status;
+  if (params.payment_status) query.payment_status = params.payment_status;
+
+  const total = await db.collection('orders').countDocuments(query);
+
+  let cursor = db.collection('orders').find(query).sort({ created_at: -1 });
+  if (params.page_size) {
+    const page = Math.max(1, Number(params.page) || 1);
+    const pageSize = Number(params.page_size);
+    cursor = cursor.skip((page - 1) * pageSize).limit(pageSize);
+  }
+  const orders = await cursor.toArray();
+
   const results = [];
   for (const o of orders) {
     const orderDetails = await getOrder(o._id.toString());
     if (orderDetails) results.push(orderDetails);
   }
-  return { results };
+  return { results, total };
 }
 
 // ── PAYMENTS ──
@@ -1307,12 +1334,25 @@ export async function getAdminEmailLogs() {
   }));
 }
 
-export async function getAdminOrders() {
+export async function getAdminOrders(params = {}) {
   const user = await getAuthenticatedUser();
   if (!user || !user.is_superuser) throw new Error('Unauthorized');
-  
-  const result = await getOrders();
-  return result.results;
+
+  return getOrders(null, params);
+}
+
+export async function deleteAdminOrder(id) {
+  const user = await getAuthenticatedUser();
+  if (!user || !user.is_superuser) throw new Error('Unauthorized');
+
+  const db = await getDb();
+  const order = await db.collection('orders').findOne(getQueryById(id));
+  if (!order) throw new Error('Order not found');
+
+  await db.collection('payments').deleteMany({ order_id: order._id.toString() });
+  await db.collection('orders').deleteOne(getQueryById(id));
+
+  return { success: true };
 }
 
 export async function getAdminOrder(id) {
