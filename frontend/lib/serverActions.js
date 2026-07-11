@@ -380,7 +380,16 @@ const getProductsCached = unstable_cache(
     finalProducts = enrichedProducts.filter(p => p.stock > 0);
   }
 
-  return { results: finalProducts };
+  const total = finalProducts.length;
+  // Paginate after the stock filter so page boundaries reflect what's actually shown.
+  if (params.page_size) {
+    const page = Math.max(1, Number(params.page) || 1);
+    const pageSize = Number(params.page_size);
+    const start = (page - 1) * pageSize;
+    finalProducts = finalProducts.slice(start, start + pageSize);
+  }
+
+  return { results: finalProducts, total };
   },
   ['products-list'],
   { tags: ['products'], revalidate: 30 }
@@ -790,32 +799,43 @@ export async function createOrder(payload) {
   
   const orderItems = [];
   const items = payload.items || [];
+  let stockChanged = false;
   for (const item of items) {
     const p = await db.collection('products').findOne(getQueryById(item.product_id));
     if (p && p.variants && p.variants.length > 0) {
       const variant = p.variants[0];
+      const quantity = item.quantity || 1;
+
+      // Recompute price server-side from the product's current discount/base_price —
+      // never trust the client-submitted price, which may be stale or manipulated.
+      const originalPrice = variant.price_override || p.base_price;
+      const effectivePrice = Math.round(originalPrice * (1 - (p.discount || 0) / 100));
+
       orderItems.push({
         id: crypto.randomUUID(),
-        quantity: item.quantity || 1,
-        price: Number(item.price || variant.price_override || p.base_price),
+        quantity,
+        price: effectivePrice,
         variant_id: String(variant.id),
         product_id: p._id.toString()
       });
-      
+
       // Reduce stock of variant in MongoDB!
-      const newStock = Math.max(0, (variant.stock || 0) - (item.quantity || 1));
+      const newStock = Math.max(0, (variant.stock || 0) - quantity);
       await db.collection('products').updateOne(
         { _id: p._id, "variants.id": variant.id },
         { $set: { "variants.$.stock": newStock } }
       );
-      revalidateTag('products');
+      stockChanged = true;
     }
   }
+  if (stockChanged) revalidateTag('products');
+
+  const total_amount = orderItems.reduce((sum, oi) => sum + oi.price * oi.quantity, 0);
 
   const orderDoc = {
     _id: orderId,
     status: payload.status || 'PENDING',
-    total_amount: Number(payload.total_amount || 0),
+    total_amount,
     shipping_address: payload.shipping_address || '',
     created_at: now,
     updated_at: now,
@@ -849,7 +869,7 @@ export async function createOrder(payload) {
   if (upi_transaction_id || screenshot_id) {
     await db.collection('payments').insertOne({
       _id: crypto.randomUUID(),
-      amount: Number(payload.total_amount || 0),
+      amount: total_amount,
       screenshot_url: screenshot_id,
       status: upi_transaction_id ? 'VERIFIED' : 'PENDING',
       submitted_at: now,
@@ -872,7 +892,7 @@ export async function createOrder(payload) {
       customer_email: customerEmail,
       customer_phone: payload.customer_phone || null,
       shipping_address: payload.shipping_address || '',
-      total_amount: Number(payload.total_amount || 0),
+      total_amount,
       payment_reference: payment_reference,
       upi_transaction_id: upi_transaction_id,
       created_at: now,

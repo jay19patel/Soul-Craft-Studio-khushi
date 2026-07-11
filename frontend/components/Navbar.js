@@ -12,7 +12,7 @@ const Navbar = () => {
   const { brand } = siteData;
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const { toggleCart, cartCount } = useCart();
+  const { toggleCart, cartCount, isReady: cartReady } = useCart();
   const { user, logout, isAuthenticated } = useAuth();
 
   return (
@@ -110,7 +110,7 @@ const Navbar = () => {
             className="relative p-2.5 text-slate-600 hover:text-orange-500 transition-all hover:bg-orange-50 rounded-full group"
           >
             <ShoppingBag className="w-6 h-6 group-hover:scale-110 transition-transform" strokeWidth={1.5} />
-            {cartCount > 0 && (
+            {cartReady && cartCount > 0 && (
               <span className="absolute top-1.5 right-1.5 w-5 h-5 bg-orange-500 text-white text-[10px] font-black flex items-center justify-center rounded-full border-2 border-white animate-in zoom-in duration-300">
                 {cartCount}
               </span>

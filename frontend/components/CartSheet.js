@@ -11,13 +11,14 @@ import { useRouter } from 'next/navigation';
 const CartSheet = () => {
     const router = useRouter();
     const { isAuthenticated } = useAuth();
-    const { 
-        cart, 
-        isCartOpen, 
-        toggleCart, 
-        removeFromCart, 
-        updateQuantity, 
-        cartTotal 
+    const {
+        cart,
+        isCartOpen,
+        toggleCart,
+        removeFromCart,
+        updateQuantity,
+        cartTotal,
+        isReady
     } = useCart();
 
     return (
@@ -61,7 +62,11 @@ const CartSheet = () => {
 
                         {/* Items List - Scrollable with solid background */}
                         <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-white scrollbar-hide">
-                            {cart.length === 0 ? (
+                            {!isReady ? (
+                                <div className="h-full flex items-center justify-center">
+                                    <div className="w-8 h-8 border-4 border-blue-600/30 border-t-blue-600 rounded-full animate-spin" />
+                                </div>
+                            ) : cart.length === 0 ? (
                                 <div className="h-full flex flex-col items-center justify-center text-center gap-4 opacity-50">
                                     <ShoppingBag className="w-12 md:w-16 h-12 md:h-16 text-slate-200" />
                                     <p className="font-sans text-slate-500 text-sm">Your cart is empty</p>

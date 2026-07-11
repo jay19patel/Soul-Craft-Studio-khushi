@@ -18,23 +18,69 @@ export const MEDIA_BASE = "";
 // serves the previous result instantly instead of re-calling the server
 // action, then silently revalidates in the background if the entry is stale.
 // Lives only for the current browser session (cleared on hard reload).
+// Invalidated explicitly by admin mutations via invalidateClientCache() below —
+// it has no automatic link to the server's revalidateTag(), so every mutation
+// wrapper in this file must call invalidateClientCache() itself.
 const clientCache = new Map();
 const CLIENT_CACHE_TTL_MS = 60_000;
+const MAX_CACHE_ENTRIES = 100;
+
+// Builds a cache key that's stable regardless of property insertion order.
+function stableKey(prefix, params) {
+  if (!params || typeof params !== 'object') return prefix;
+  const sortedEntries = Object.keys(params).sort().map((k) => [k, params[k]]);
+  return `${prefix}:${JSON.stringify(sortedEntries)}`;
+}
+
+function pruneCache() {
+  while (clientCache.size > MAX_CACHE_ENTRIES) {
+    const oldestKey = clientCache.keys().next().value;
+    clientCache.delete(oldestKey);
+  }
+}
 
 function withClientCache(key, fetcher) {
   const cached = clientCache.get(key);
-  if (cached) {
-    if (Date.now() - cached.time < CLIENT_CACHE_TTL_MS) {
-      return Promise.resolve(cached.value);
-    }
-    // Stale: return it immediately, refresh in the background for next time.
-    fetcher().then((value) => clientCache.set(key, { value, time: Date.now() })).catch(() => {});
+
+  // An identical request is already in flight — share it instead of firing a duplicate.
+  if (cached?.promise) {
+    return cached.promise;
+  }
+
+  if (cached && Date.now() - cached.time < CLIENT_CACHE_TTL_MS) {
     return Promise.resolve(cached.value);
   }
-  return fetcher().then((value) => {
-    clientCache.set(key, { value, time: Date.now() });
-    return value;
-  });
+
+  const promise = fetcher()
+    .then((value) => {
+      clientCache.set(key, { value, time: Date.now() });
+      pruneCache();
+      return value;
+    })
+    .catch((err) => {
+      if (cached) {
+        // Keep serving the last known-good value, but record this attempt so
+        // we back off instead of retrying the server on every single call.
+        clientCache.set(key, { value: cached.value, time: Date.now() });
+        return cached.value;
+      }
+      clientCache.delete(key);
+      throw err;
+    });
+
+  clientCache.set(key, { value: cached?.value, time: cached?.time ?? 0, promise });
+  return promise;
+}
+
+// Clears every cache entry under a given namespace (e.g. 'products', 'product',
+// 'categories') — call this from any mutation so admins/shoppers see fresh
+// data immediately instead of waiting out CLIENT_CACHE_TTL_MS.
+function invalidateClientCache(prefix) {
+  for (const key of clientCache.keys()) {
+    if (key === prefix || key.startsWith(`${prefix}:`)) {
+      clientCache.delete(key);
+    }
+  }
 }
 
 // ── Normalization Helpers ──
@@ -143,16 +189,23 @@ export async function getCategories() {
 
 export async function createAdminCategory(categoryData) {
   const data = await server.createAdminCategory(categoryData);
+  invalidateClientCache('categories');
+  invalidateClientCache('products'); // product listings embed category name/image
   return normalizeCategory(data);
 }
 
 export async function updateAdminCategory(id, categoryData) {
   const data = await server.updateAdminCategory(id, categoryData);
+  invalidateClientCache('categories');
+  invalidateClientCache('products');
   return normalizeCategory(data);
 }
 
 export async function deleteAdminCategory(id) {
-  return await server.deleteAdminCategory(id);
+  const result = await server.deleteAdminCategory(id);
+  invalidateClientCache('categories');
+  invalidateClientCache('products');
+  return result;
 }
 
 export async function getTestimonials() {
@@ -169,11 +222,12 @@ export async function submitTestimonial(payload) {
 }
 
 export async function getProducts(params = {}) {
-  return withClientCache(`products:${JSON.stringify(params)}`, async () => {
+  return withClientCache(stableKey('products', params), async () => {
     const data = await server.getProducts(params);
     const results = data?.results ?? [];
     return {
-      results: results.map(normalizeProduct)
+      results: results.map(normalizeProduct),
+      total: data?.total ?? results.length
     };
   });
 }
@@ -187,6 +241,8 @@ export async function getProduct(id) {
 
 export async function createOrder(payload) {
   const data = await server.createOrder(payload);
+  invalidateClientCache('products'); // order placement reduces variant stock
+  invalidateClientCache('product');
   return normalizeOrder(data);
 }
 
@@ -308,16 +364,23 @@ export async function getAdminProducts() {
 export async function createAdminProduct(productData) {
   // If productData is FormData, pass it directly, else handle object
   const data = await server.createAdminProduct(productData);
+  invalidateClientCache('products');
+  invalidateClientCache('product');
   return normalizeProduct(data);
 }
 
 export async function updateAdminProduct(id, productData) {
   const data = await server.updateAdminProduct(id, productData);
+  invalidateClientCache('products');
+  invalidateClientCache('product');
   return normalizeProduct(data);
 }
 
 export async function deleteAdminProduct(id) {
-  return await server.deleteAdminProduct(id);
+  const result = await server.deleteAdminProduct(id);
+  invalidateClientCache('products');
+  invalidateClientCache('product');
+  return result;
 }
 
 export async function submitContactMessage(messageData) {

@@ -191,7 +191,8 @@ const CheckoutPage = () => {
   // Wait for the cart to finish loading from the server before rendering
   // anything cart-dependent — otherwise cartTotal/prices briefly show ₹0
   // while the initial fetchActiveCart() request is still in flight.
-  if (authLoading || !cartReady) {
+  // (authLoading is already handled by the guard above, at line 66.)
+  if (!cartReady) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col">
         <Navbar />
