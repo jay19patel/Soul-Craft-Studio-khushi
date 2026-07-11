@@ -244,27 +244,22 @@ const ProductDetailPage = () => {
                 <button
                   onClick={handleBuyNow}
                   disabled={product.stock === 0}
-                  className="flex-grow bg-blue-600 text-white py-4 md:py-5 rounded-full font-black uppercase tracking-widest text-xs md:text-sm shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="flex-1 bg-blue-600 text-white py-4 md:py-5 rounded-full font-black uppercase tracking-widest text-xs md:text-sm shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   Buy Now
                 </button>
-                <button className="p-4 md:p-5 border-2 border-slate-100 rounded-full text-slate-400 hover:text-orange-500 hover:border-orange-100 hover:bg-orange-50 transition-all group">
-                  <svg className="w-5 h-5 md:w-6 md:h-6 group-hover:fill-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-                  </svg>
+                <button
+                  onClick={handleAddToCart}
+                  disabled={product.stock === 0}
+                  className={`flex-1 border-2 py-4 md:py-5 rounded-full font-black uppercase tracking-widest text-xs md:text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                    addedToCart
+                      ? 'bg-green-500 border-green-500 text-white'
+                      : 'border-blue-600 text-blue-600 hover:bg-blue-50'
+                  }`}
+                >
+                  {addedToCart ? '✓ Added' : 'Add to Cart'}
                 </button>
               </div>
-              <button
-                onClick={handleAddToCart}
-                disabled={product.stock === 0}
-                className={`w-full border-2 py-4 md:py-5 rounded-full font-black uppercase tracking-widest text-xs md:text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
-                  addedToCart
-                    ? 'bg-green-500 border-green-500 text-white'
-                    : 'border-blue-600 text-blue-600 hover:bg-blue-50'
-                }`}
-              >
-                {addedToCart ? '✓ Added to Cart' : 'Add to Cart'}
-              </button>
             </div>
 
             {/* Trust Badges */}

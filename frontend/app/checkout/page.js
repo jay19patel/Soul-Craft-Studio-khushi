@@ -16,6 +16,7 @@ const CheckoutPage = () => {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
+  const [orderPlaced, setOrderPlaced] = useState(false);
   const [step, setStep] = useState('shipping'); // 'shipping' | 'payment'
   const [formData, setFormData] = useState({
     fullName: '',
@@ -173,7 +174,9 @@ const CheckoutPage = () => {
 
       const createdOrder = await createOrder(payload);
 
-      // Clear cart
+      // Mark the order as placed before clearing the cart so the
+      // "cart is empty" guard below doesn't flash while we navigate away.
+      setOrderPlaced(true);
       clearCart();
 
       // Redirect to success page with real order ID
@@ -185,8 +188,9 @@ const CheckoutPage = () => {
     }
   };
 
-  // Empty cart guard
-  if (cart.length === 0) {
+  // Empty cart guard (skip while redirecting away after a successful order,
+  // since clearCart() empties the cart before router.push takes effect)
+  if (cart.length === 0 && !orderPlaced) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col">
         <Navbar />
