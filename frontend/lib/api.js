@@ -134,6 +134,14 @@ export async function getTestimonials() {
   return data?.results ?? [];
 }
 
+export async function getMyTestimonial() {
+  return await server.getMyTestimonial();
+}
+
+export async function submitTestimonial(payload) {
+  return await server.submitTestimonial(payload);
+}
+
 export async function getProducts(params = {}) {
   const data = await server.getProducts(params);
   const results = data?.results ?? [];

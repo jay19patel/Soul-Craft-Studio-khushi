@@ -231,13 +231,58 @@ export async function deleteAdminCategory(id) {
 
 export async function getTestimonials() {
   const db = await getDb();
-  const testimonials = await db.collection('testimonials').find({ is_active: true }).toArray();
+  const testimonials = await db.collection('testimonials').find({ is_active: true }).sort({ created_at: -1 }).toArray();
   return {
-    results: testimonials.map(t => ({
+    results: testimonials.map(({ _id, ...t }) => ({
       ...t,
-      id: t._id.toString()
+      id: _id.toString()
     }))
   };
+}
+
+export async function getMyTestimonial() {
+  const user = await getAuthenticatedUser();
+  if (!user) throw new Error('Unauthenticated');
+
+  const db = await getDb();
+  const testimonial = await db.collection('testimonials').findOne({ user_id: user.id });
+  if (!testimonial) return null;
+
+  const { _id, ...t } = testimonial;
+  return { ...t, id: _id.toString() };
+}
+
+export async function submitTestimonial(payload) {
+  const user = await getAuthenticatedUser();
+  if (!user) throw new Error('Unauthenticated');
+
+  const content = (payload.content || '').trim();
+  if (!content) throw new Error('Feedback message is required.');
+  const rating = Math.min(5, Math.max(1, Number(payload.rating) || 5));
+
+  const db = await getDb();
+  const now = getFormattedDate();
+  const existing = await db.collection('testimonials').findOne({ user_id: user.id });
+
+  if (existing) {
+    await db.collection('testimonials').updateOne(
+      { _id: existing._id },
+      { $set: { content, rating, updated_at: now, is_active: true } }
+    );
+    return { id: existing._id.toString(), content, rating };
+  }
+
+  const result = await db.collection('testimonials').insertOne({
+    user_id: user.id,
+    author_name: user.full_name || user.email,
+    content,
+    rating,
+    is_active: true,
+    created_at: now,
+    updated_at: now
+  });
+
+  return { id: result.insertedId.toString(), content, rating };
 }
 
 export async function getProducts(params = {}) {

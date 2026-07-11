@@ -5,14 +5,14 @@ import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import { useAuth } from '../../context/AuthContext';
 import { useRouter } from 'next/navigation';
-import { User, Lock, Save, AlertCircle, CheckCircle2, MapPin, Phone, Plus, Star, LayoutDashboard } from 'lucide-react';
-import { getAddresses, addAddress, setDefaultAddress, getContacts, addContact, setDefaultContact } from '../../lib/api';
+import { User, Lock, Save, AlertCircle, CheckCircle2, MapPin, Phone, Plus, Star, LayoutDashboard, MessageSquareHeart } from 'lucide-react';
+import { getAddresses, addAddress, setDefaultAddress, getContacts, addContact, setDefaultContact, getMyTestimonial, submitTestimonial } from '../../lib/api';
 
 export default function ProfilePage() {
   const { user, isAuthenticated, updateUserProfile } = useAuth();
   const router = useRouter();
 
-  const [activeTab, setActiveTab] = useState('profile'); // profile, addresses, contacts
+  const [activeTab, setActiveTab] = useState('profile'); // profile, addresses, contacts, feedback
 
   const [formData, setFormData] = useState({
     full_name: '',
@@ -38,6 +38,12 @@ export default function ProfilePage() {
   const [isSavingContact, setIsSavingContact] = useState(false);
   const [settingDefaultContactId, setSettingDefaultContactId] = useState(null);
 
+  // Feedback (Customer Story) State — one testimonial per user
+  const [myTestimonial, setMyTestimonial] = useState(null);
+  const [feedbackForm, setFeedbackForm] = useState({ content: '', rating: 5 });
+  const [isSavingFeedback, setIsSavingFeedback] = useState(false);
+  const [feedbackSuccess, setFeedbackSuccess] = useState('');
+
   useEffect(() => {
     if (user) {
       setFormData((prev) => ({
@@ -51,6 +57,7 @@ export default function ProfilePage() {
     if (isAuthenticated) {
       fetchAddresses();
       fetchContacts();
+      fetchMyTestimonial();
     }
   }, [isAuthenticated]);
 
@@ -169,6 +176,35 @@ export default function ProfilePage() {
     }
   };
 
+  // --- Feedback (Customer Story) Logic ---
+  const fetchMyTestimonial = async () => {
+    try {
+      const data = await getMyTestimonial();
+      setMyTestimonial(data);
+      if (data) {
+        setFeedbackForm({ content: data.content || '', rating: data.rating || 5 });
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleFeedbackSubmit = async (e) => {
+    e.preventDefault();
+    if (isSavingFeedback) return;
+    setIsSavingFeedback(true);
+    setFeedbackSuccess('');
+    try {
+      await submitTestimonial(feedbackForm);
+      setFeedbackSuccess(myTestimonial ? 'Your feedback has been updated!' : 'Thanks for your feedback! It now appears in Customer Stories.');
+      fetchMyTestimonial();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSavingFeedback(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
       <Navbar />
@@ -188,6 +224,10 @@ export default function ProfilePage() {
           <button onClick={() => setActiveTab('contacts')} className={`p-4 rounded-2xl flex items-center gap-3 transition-all ${activeTab === 'contacts' ? 'bg-blue-600 text-white shadow-lg' : 'bg-white hover:bg-slate-100 text-slate-600'}`}>
             <Phone className="w-5 h-5" />
             <span className="font-bold text-sm uppercase tracking-wider">Contacts</span>
+          </button>
+          <button onClick={() => setActiveTab('feedback')} className={`p-4 rounded-2xl flex items-center gap-3 transition-all ${activeTab === 'feedback' ? 'bg-blue-600 text-white shadow-lg' : 'bg-white hover:bg-slate-100 text-slate-600'}`}>
+            <MessageSquareHeart className="w-5 h-5" />
+            <span className="font-bold text-sm uppercase tracking-wider">Feedback</span>
           </button>
         </div>
 
@@ -318,6 +358,58 @@ export default function ProfilePage() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* FEEDBACK TAB */}
+          {activeTab === 'feedback' && (
+            <div className="flex flex-col gap-6">
+              <div>
+                <h2 className="text-2xl font-[family-name:var(--font-climate-crisis)] uppercase text-blue-950">Your Feedback</h2>
+                <p className="text-sm text-slate-500 mt-1">Share your experience — it&apos;ll appear in Customer Stories on our homepage.</p>
+              </div>
+
+              {feedbackSuccess && (
+                <div className="bg-green-50 border border-green-100 text-green-600 px-4 py-3 rounded-2xl text-sm">
+                  {feedbackSuccess}
+                </div>
+              )}
+
+              <form onSubmit={handleFeedbackSubmit} className="bg-slate-50 p-6 rounded-3xl flex flex-col gap-4 max-w-lg">
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Your Rating</label>
+                  <div className="flex items-center gap-1">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        type="button"
+                        onClick={() => setFeedbackForm({ ...feedbackForm, rating: star })}
+                        className="p-1"
+                      >
+                        <Star
+                          className={`w-6 h-6 ${star <= feedbackForm.rating ? 'text-orange-500 fill-orange-500' : 'text-slate-300'}`}
+                        />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Your Story</label>
+                  <textarea
+                    placeholder="Tell us about your experience with our products..."
+                    required
+                    value={feedbackForm.content}
+                    onChange={(e) => setFeedbackForm({ ...feedbackForm, content: e.target.value })}
+                    className="w-full bg-white rounded-xl py-3 px-4 text-sm"
+                    rows={4}
+                  />
+                </div>
+
+                <button type="submit" disabled={isSavingFeedback} className="bg-blue-600 text-white rounded-xl py-3 font-bold text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                  {isSavingFeedback ? 'Saving...' : myTestimonial ? 'Update Feedback' : 'Submit Feedback'}
+                </button>
+              </form>
             </div>
           )}
 
