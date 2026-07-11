@@ -655,7 +655,7 @@ export async function getAddresses() {
   
   const db = await getDb();
   const addresses = await db.collection('addresses').find({ user_id: user.id }).toArray();
-  return addresses.map(addr => ({ ...addr, id: addr._id.toString() }));
+  return addresses.map(({ _id, ...addr }) => ({ ...addr, id: _id.toString() }));
 }
 
 export async function addAddress(payload) {
@@ -704,7 +704,7 @@ export async function getContacts() {
   
   const db = await getDb();
   const contacts = await db.collection('contacts').find({ user_id: user.id }).toArray();
-  return contacts.map(c => ({ ...c, id: c._id.toString() }));
+  return contacts.map(({ _id, ...c }) => ({ ...c, id: _id.toString() }));
 }
 
 export async function addContact(payload) {
@@ -968,9 +968,9 @@ export async function getPayments(params = {}) {
   
   const payments = await db.collection('payments').find(query).sort({ created_at: -1 }).toArray();
   return {
-    results: payments.map(p => ({
+    results: payments.map(({ _id, ...p }) => ({
       ...p,
-      id: p._id.toString()
+      id: _id.toString()
     }))
   };
 }
@@ -1576,9 +1576,9 @@ export async function getAdminMessages() {
   
   const db = await getDb();
   const messages = await db.collection('contactmessages').find().sort({ created_at: -1 }).toArray();
-  return messages.map(m => ({
+  return messages.map(({ _id, ...m }) => ({
     ...m,
-    id: m._id.toString()
+    id: _id.toString()
   }));
 }
 
