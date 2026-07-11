@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { getMe, login as apiLogin, register as apiRegister, logout as apiLogout, googleLogin as apiGoogleLogin } from '../lib/api';
+import { getMe, login as apiLogin, register as apiRegister, logout as apiLogout } from '../lib/api';
 import { useRouter, usePathname } from 'next/navigation';
 
 const AuthContext = createContext();
@@ -68,7 +68,7 @@ export function AuthProvider({ children }) {
           setUser(null);
         } else {
           console.warn(
-            'Stale /me failure ignored: auth token changed while the request was in flight (e.g. after Google login).',
+            'Stale /me failure ignored: auth token changed while the request was in flight.',
           );
         }
       } else {
@@ -92,27 +92,6 @@ export function AuthProvider({ children }) {
     }
   }, [loadUser]);
 
-
-  const loginWithGoogle = async (access_token) => {
-    try {
-      const response = await apiGoogleLogin(access_token);
-      const accessToken = response.access_token || response.key || response.access;
-
-      if (!accessToken) {
-        throw new Error('Failed to get access token from Google login');
-      }
-
-      localStorage.setItem('auth_token', accessToken);
-      setToken(accessToken);
-
-      await loadUser();
-
-      return { success: true };
-    } catch (error) {
-      console.error('Google login error:', error);
-      return { success: false, error: error.message };
-    }
-  };
 
   const login = async (email, password) => {
     try {
@@ -210,8 +189,6 @@ export function AuthProvider({ children }) {
     loading,
     error,
     login,
-    loginWithGoogle,
-    googleLogin: loginWithGoogle,
     register,
     logout,
     setAuthFromToken,

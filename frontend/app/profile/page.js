@@ -28,11 +28,15 @@ export default function ProfilePage() {
   const [addresses, setAddresses] = useState([]);
   const [showAddAddress, setShowAddAddress] = useState(false);
   const [addressForm, setAddressForm] = useState({ full_name: '', address_line: '', city: '', state: '', pincode: '', is_default: false });
+  const [isSavingAddress, setIsSavingAddress] = useState(false);
+  const [settingDefaultAddressId, setSettingDefaultAddressId] = useState(null);
 
   // Contact State
   const [contacts, setContacts] = useState([]);
   const [showAddContact, setShowAddContact] = useState(false);
   const [contactForm, setContactForm] = useState({ phone_number: '', is_default: false });
+  const [isSavingContact, setIsSavingContact] = useState(false);
+  const [settingDefaultContactId, setSettingDefaultContactId] = useState(null);
 
   useEffect(() => {
     if (user) {
@@ -99,6 +103,8 @@ export default function ProfilePage() {
 
   const handleAddressSubmit = async (e) => {
     e.preventDefault();
+    if (isSavingAddress) return;
+    setIsSavingAddress(true);
     try {
       await addAddress(addressForm);
       setAddressForm({ full_name: '', address_line: '', city: '', state: '', pincode: '', is_default: false });
@@ -106,15 +112,21 @@ export default function ProfilePage() {
       fetchAddresses();
     } catch (err) {
       console.error(err);
+    } finally {
+      setIsSavingAddress(false);
     }
   };
 
   const handleSetDefaultAddress = async (id) => {
+    if (settingDefaultAddressId) return;
+    setSettingDefaultAddressId(id);
     try {
       await setDefaultAddress(id);
       fetchAddresses();
     } catch (err) {
       console.error(err);
+    } finally {
+      setSettingDefaultAddressId(null);
     }
   };
 
@@ -130,6 +142,8 @@ export default function ProfilePage() {
 
   const handleContactSubmit = async (e) => {
     e.preventDefault();
+    if (isSavingContact) return;
+    setIsSavingContact(true);
     try {
       await addContact(contactForm);
       setContactForm({ phone_number: '', is_default: false });
@@ -137,15 +151,21 @@ export default function ProfilePage() {
       fetchContacts();
     } catch (err) {
       console.error(err);
+    } finally {
+      setIsSavingContact(false);
     }
   };
 
   const handleSetDefaultContact = async (id) => {
+    if (settingDefaultContactId) return;
+    setSettingDefaultContactId(id);
     try {
       await setDefaultContact(id);
       fetchContacts();
     } catch (err) {
       console.error(err);
+    } finally {
+      setSettingDefaultContactId(null);
     }
   };
 
@@ -236,7 +256,7 @@ export default function ProfilePage() {
                     <input type="checkbox" checked={addressForm.is_default} onChange={(e) => setAddressForm({...addressForm, is_default: e.target.checked})} className="w-4 h-4 rounded text-blue-600" />
                     Set as default address
                   </label>
-                  <button type="submit" className="bg-blue-600 text-white rounded-xl py-3 font-bold text-sm hover:bg-blue-700">Save Address</button>
+                  <button type="submit" disabled={isSavingAddress} className="bg-blue-600 text-white rounded-xl py-3 font-bold text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">{isSavingAddress ? 'Saving...' : 'Save Address'}</button>
                 </form>
               )}
 
@@ -249,7 +269,9 @@ export default function ProfilePage() {
                       {addr.is_default ? (
                         <span className="bg-orange-500 text-white text-[9px] font-bold px-2 py-1 rounded-full uppercase">Default</span>
                       ) : (
-                        <button onClick={() => handleSetDefaultAddress(addr.id)} className="text-[10px] font-bold text-slate-400 hover:text-blue-600 uppercase">Set Default</button>
+                        <button onClick={() => handleSetDefaultAddress(addr.id)} disabled={settingDefaultAddressId === addr.id} className="text-[10px] font-bold text-slate-400 hover:text-blue-600 uppercase disabled:opacity-40 disabled:cursor-not-allowed">
+                          {settingDefaultAddressId === addr.id ? 'Setting...' : 'Set Default'}
+                        </button>
                       )}
                     </div>
                     <p className="text-sm text-slate-600">{addr.address_line}</p>
@@ -277,7 +299,7 @@ export default function ProfilePage() {
                     <input type="checkbox" checked={contactForm.is_default} onChange={(e) => setContactForm({...contactForm, is_default: e.target.checked})} className="w-4 h-4 rounded text-blue-600" />
                     Set as default contact
                   </label>
-                  <button type="submit" className="bg-blue-600 text-white rounded-xl py-3 font-bold text-sm hover:bg-blue-700">Save Contact</button>
+                  <button type="submit" disabled={isSavingContact} className="bg-blue-600 text-white rounded-xl py-3 font-bold text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">{isSavingContact ? 'Saving...' : 'Save Contact'}</button>
                 </form>
               )}
 
@@ -289,7 +311,9 @@ export default function ProfilePage() {
                     {contact.is_default ? (
                       <span className="bg-orange-500 text-white text-[9px] font-bold px-2 py-1 rounded-full uppercase">Default</span>
                     ) : (
-                      <button onClick={() => handleSetDefaultContact(contact.id)} className="text-[10px] font-bold text-slate-400 hover:text-blue-600 uppercase">Set Default</button>
+                      <button onClick={() => handleSetDefaultContact(contact.id)} disabled={settingDefaultContactId === contact.id} className="text-[10px] font-bold text-slate-400 hover:text-blue-600 uppercase disabled:opacity-40 disabled:cursor-not-allowed">
+                        {settingDefaultContactId === contact.id ? 'Setting...' : 'Set Default'}
+                      </button>
                     )}
                   </div>
                 ))}

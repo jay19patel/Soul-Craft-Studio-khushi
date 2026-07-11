@@ -26,7 +26,8 @@ export default function AdminProductsPage() {
     slug: '',
     description: '',
     price: '',
-    category: ''
+    category: '',
+    is_active: true
   });
 
   // Category Management State
@@ -38,6 +39,12 @@ export default function AdminProductsPage() {
     description: '',
     image: null
   });
+
+  // Submission guards to prevent double-click / double-submit creating duplicate entries
+  const [isSavingProduct, setIsSavingProduct] = useState(false);
+  const [deletingProductId, setDeletingProductId] = useState(null);
+  const [isSavingCategory, setIsSavingCategory] = useState(false);
+  const [deletingCategoryId, setDeletingCategoryId] = useState(null);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -84,11 +91,12 @@ export default function AdminProductsPage() {
         description: product.description || '',
         price: product.priceValue || product.price || '',
         category: product.category?.id || product.category_id || '',
+        is_active: product.is_active !== undefined ? !!product.is_active : true,
         image: null,
       });
     } else {
       setEditingProduct(null);
-      setFormData({ name: '', slug: '', description: '', price: '', category: '', image: null });
+      setFormData({ name: '', slug: '', description: '', price: '', category: '', is_active: true, image: null });
     }
     setIsModalOpen(true);
   };
@@ -100,6 +108,8 @@ export default function AdminProductsPage() {
 
   const handleSave = async (e) => {
     e.preventDefault();
+    if (isSavingProduct) return;
+    setIsSavingProduct(true);
     try {
       const submitData = new FormData();
       submitData.append('name', formData.name);
@@ -107,6 +117,7 @@ export default function AdminProductsPage() {
       submitData.append('description', formData.description);
       submitData.append('price', formData.price);
       submitData.append('base_price', formData.price);
+      submitData.append('is_active', formData.is_active ? 'true' : 'false');
       if (formData.category) {
         submitData.append('category_id', formData.category);
       }
@@ -123,16 +134,22 @@ export default function AdminProductsPage() {
       fetchProducts();
     } catch (err) {
       alert('Error saving product: ' + err.message);
+    } finally {
+      setIsSavingProduct(false);
     }
   };
 
   const handleDelete = async (id) => {
+    if (deletingProductId) return;
     if (window.confirm("Are you sure you want to delete this product?")) {
+      setDeletingProductId(id);
       try {
         await deleteAdminProduct(id);
         fetchProducts();
       } catch (err) {
         alert('Error deleting product: ' + err.message);
+      } finally {
+        setDeletingProductId(null);
       }
     }
   };
@@ -140,6 +157,8 @@ export default function AdminProductsPage() {
   // Category CRUD Handlers
   const handleCategorySave = async (e) => {
     e.preventDefault();
+    if (isSavingCategory) return;
+    setIsSavingCategory(true);
     try {
       const submitData = new FormData();
       submitData.append('name', categoryFormData.name);
@@ -154,7 +173,7 @@ export default function AdminProductsPage() {
       } else {
         await createAdminCategory(submitData);
       }
-      
+
       // Reset form and reload
       setCategoryFormData({ name: '', slug: '', description: '', image: null });
       setEditingCategory(null);
@@ -162,17 +181,23 @@ export default function AdminProductsPage() {
       fetchProducts(); // Refresh product list in case category names updated
     } catch (err) {
       alert('Error saving category: ' + err.message);
+    } finally {
+      setIsSavingCategory(false);
     }
   };
 
   const handleCategoryDelete = async (id) => {
+    if (deletingCategoryId) return;
     if (window.confirm("Are you sure you want to delete this category? All products under it will revert to the default category.")) {
+      setDeletingCategoryId(id);
       try {
         await deleteAdminCategory(id);
         fetchCategories();
         fetchProducts();
       } catch (err) {
         alert('Error deleting category: ' + err.message);
+      } finally {
+        setDeletingCategoryId(null);
       }
     }
   };
@@ -297,6 +322,11 @@ export default function AdminProductsPage() {
                                   {product.category.name}
                                 </span>
                               )}
+                              {!product.is_active && (
+                                <span className="bg-red-50 text-red-500 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                                  Inactive
+                                </span>
+                              )}
                             </div>
                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{product.slug}</span>
                           </div>
@@ -313,9 +343,10 @@ export default function AdminProductsPage() {
                           >
                             <Edit3 className="w-4 h-4" />
                           </button>
-                          <button 
+                          <button
                             onClick={() => handleDelete(product.id)}
-                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                            disabled={deletingProductId === product.id}
+                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -395,20 +426,30 @@ export default function AdminProductsPage() {
 
               <div className="flex flex-col gap-2">
                 <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Product Image</label>
-                <input 
-                  type="file" 
+                <input
+                  type="file"
                   accept="image/*"
                   onChange={(e) => setFormData({...formData, image: e.target.files[0]})}
                   className="w-full bg-slate-50 border-none rounded-xl py-3 px-4 text-sm font-medium text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"
                 />
               </div>
 
+              <label className="flex items-center gap-3 bg-slate-50 rounded-xl py-3 px-4 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.is_active}
+                  onChange={(e) => setFormData({...formData, is_active: e.target.checked})}
+                  className="w-4 h-4 rounded text-indigo-600"
+                />
+                <span className="text-sm font-bold text-slate-700">Active (visible in shop)</span>
+              </label>
+
               <div className="pt-4 border-t border-slate-100 flex justify-end gap-3">
-                <button type="button" onClick={closeModal} className="px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest text-slate-500 hover:bg-slate-100 transition-colors">
+                <button type="button" onClick={closeModal} disabled={isSavingProduct} className="px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest text-slate-500 hover:bg-slate-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                   Cancel
                 </button>
-                <button type="submit" className="bg-indigo-600 text-white px-8 py-3 rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-colors">
-                  Save Product
+                <button type="submit" disabled={isSavingProduct} className="bg-indigo-600 text-white px-8 py-3 rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                  {isSavingProduct ? 'Saving...' : 'Save Product'}
                 </button>
               </div>
 
@@ -457,17 +498,19 @@ export default function AdminProductsPage() {
                         </div>
                         
                         <div className="flex items-center gap-1">
-                          <button 
+                          <button
                             type="button"
                             onClick={() => startCategoryEdit(cat)}
-                            className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors"
+                            disabled={deletingCategoryId === cat.id}
+                            className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             <Edit3 className="w-3.5 h-3.5" />
                           </button>
-                          <button 
+                          <button
                             type="button"
                             onClick={() => handleCategoryDelete(cat.id)}
-                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                            disabled={deletingCategoryId === cat.id}
+                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -531,19 +574,21 @@ export default function AdminProductsPage() {
 
                   <div className="pt-4 flex justify-end gap-3">
                     {editingCategory && (
-                      <button 
-                        type="button" 
-                        onClick={cancelCategoryEdit} 
-                        className="px-5 py-3 rounded-xl text-xs font-black uppercase tracking-widest text-slate-500 hover:bg-slate-100 transition-colors"
+                      <button
+                        type="button"
+                        onClick={cancelCategoryEdit}
+                        disabled={isSavingCategory}
+                        className="px-5 py-3 rounded-xl text-xs font-black uppercase tracking-widest text-slate-500 hover:bg-slate-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         Cancel
                       </button>
                     )}
-                    <button 
-                      type="submit" 
-                      className="bg-indigo-600 text-white px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-colors"
+                    <button
+                      type="submit"
+                      disabled={isSavingCategory}
+                      className="bg-indigo-600 text-white px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {editingCategory ? 'Update Category' : 'Save Category'}
+                      {isSavingCategory ? 'Saving...' : editingCategory ? 'Update Category' : 'Save Category'}
                     </button>
                   </div>
                 </form>

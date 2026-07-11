@@ -7,10 +7,9 @@ import Link from 'next/link';
 import { useAuth } from '../../context/AuthContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { LogIn, Mail, Lock, AlertCircle } from 'lucide-react';
-import { useGoogleLogin } from '@react-oauth/google';
 
 function LoginPageContent() {
-  const { login, loginWithGoogle } = useAuth();
+  const { login } = useAuth();
   const router = useRouter();
 
   const searchParams = useSearchParams();
@@ -38,32 +37,6 @@ function LoginPageContent() {
       setLoading(false);
     }
   };
-
-  const handleGoogleLogin = useGoogleLogin({
-    onSuccess: async (tokenResponse) => {
-      setLoading(true);
-      setError('');
-      try {
-        console.log('Google login token received');
-        // allauth google endpoint usually takes access_token directly
-        const result = await loginWithGoogle(tokenResponse.access_token);
-        if (result.success) {
-          router.push(redirectPath);
-        } else {
-          setError(result.error || 'Google login failed');
-        }
-      } catch (err) {
-        setError(err.message || 'Google login failed');
-      } finally {
-        setLoading(false);
-      }
-    },
-    onError: (error) => {
-      console.error('Google Login Failed:', error);
-      setError('Google Login Failed');
-    },
-    // We request the access_token implicitly for REST API auth (implicit flow instead of auth-code)
-  });
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900 selection:bg-orange-200">
@@ -140,22 +113,6 @@ function LoginPageContent() {
               </form>
 
               <div className="flex flex-col gap-6 items-center mt-6">
-                <div className="w-full flex items-center gap-4">
-                  <div className="h-px bg-slate-100 flex-grow" />
-                  <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">or continue with</span>
-                  <div className="h-px bg-slate-100 flex-grow" />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => handleGoogleLogin()}
-                  disabled={loading}
-                  className="w-full bg-white border border-slate-200 text-slate-600 rounded-2xl py-4 font-bold text-sm hover:bg-slate-50 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
-                >
-                  <img src="https://www.google.com/favicon.ico" className="w-5 h-5 grayscale" alt="Google" />
-                  <span>{loading ? 'Processing...' : 'Google Account'}</span>
-                </button>
-
                 <p className="text-sm text-slate-500 font-medium">
                   Don&apos;t have an account?{' '}
                   <Link href="/register" className="text-orange-500 font-bold hover:underline">Register here</Link>

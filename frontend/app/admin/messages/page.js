@@ -16,6 +16,8 @@ export default function AdminMessagesPage() {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [togglingId, setTogglingId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -44,21 +46,29 @@ export default function AdminMessagesPage() {
   };
 
   const toggleReadStatus = async (message) => {
+    if (togglingId) return;
+    setTogglingId(message.id);
     try {
       await updateAdminMessage(message.id, { is_read: !message.is_read });
       setMessages(messages.map(m => m.id === message.id ? { ...m, is_read: !m.is_read } : m));
     } catch (err) {
       alert('Error updating status: ' + err.message);
+    } finally {
+      setTogglingId(null);
     }
   };
 
   const handleDelete = async (id) => {
+    if (deletingId) return;
     if (window.confirm("Are you sure you want to delete this message?")) {
+      setDeletingId(id);
       try {
         await deleteAdminMessage(id);
         setMessages(messages.filter(m => m.id !== id));
       } catch (err) {
         alert('Error deleting message: ' + err.message);
+      } finally {
+        setDeletingId(null);
       }
     }
   };
@@ -138,9 +148,10 @@ export default function AdminMessagesPage() {
                   ) : filteredMessages.map((msg) => (
                     <tr key={msg.id} className={`hover:bg-slate-50/50 transition-colors group ${!msg.is_read ? 'bg-indigo-50/20' : ''}`}>
                       <td className="py-4 pl-4 align-top">
-                        <button 
+                        <button
                           onClick={() => toggleReadStatus(msg)}
-                          className="mt-1"
+                          disabled={togglingId === msg.id}
+                          className="mt-1 disabled:opacity-40 disabled:cursor-not-allowed"
                           title={msg.is_read ? "Mark as unread" : "Mark as read"}
                         >
                           {msg.is_read ? (
@@ -167,9 +178,10 @@ export default function AdminMessagesPage() {
                       </td>
                       <td className="py-4 pr-4 align-top text-right">
                         <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity mt-1">
-                          <button 
+                          <button
                             onClick={() => handleDelete(msg.id)}
-                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                            disabled={deletingId === msg.id}
+                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                             title="Delete message"
                           >
                             <Trash2 className="w-4 h-4" />

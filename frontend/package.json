@@ -9,12 +9,12 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@react-oauth/google": "^0.13.5",
+    "@vercel/blob": "^2.6.1",
     "canvas-confetti": "^1.9.4",
     "clsx": "^2.1.1",
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.6.0",
-    "mongodb": "^7.3.0",
+    "mongodb": "^7.5.0",
     "next": "16.2.0",
     "nodemailer": "^8.0.11",
     "pdfkit": "^0.19.1",

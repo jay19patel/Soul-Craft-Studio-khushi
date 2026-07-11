@@ -176,10 +176,6 @@ export async function login(email, password) {
   return await server.login(email, password);
 }
 
-export async function googleLogin(access_token) {
-  return await server.googleLogin(access_token);
-}
-
 export async function getMe() {
   return await server.getMe();
 }
