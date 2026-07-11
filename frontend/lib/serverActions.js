@@ -397,7 +397,6 @@ export async function register(data) {
     username: email,
     last_name: '',
     email: email,
-    is_staff: false,
     is_active: true,
     date_joined: now,
     first_name: name
@@ -423,41 +422,7 @@ export async function register(data) {
 export async function login(email, password) {
   const db = await getDb();
   const cleanEmail = email?.trim().toLowerCase();
-  
-  // Check if we should seed the default admin from env
-  const envAdminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
-  const envAdminPassword = process.env.ADMIN_PASSWORD;
-  
-  if (envAdminEmail && envAdminPassword && cleanEmail === envAdminEmail) {
-    if (password === envAdminPassword) {
-      let adminUser = await db.collection('users').findOne({ username: envAdminEmail });
-      const now = getFormattedDate();
-      const hashedEnvPass = hashPassword(envAdminPassword);
-      
-      if (!adminUser) {
-        console.log('Seeding default admin user from env:', envAdminEmail);
-        await db.collection('users').insertOne({
-          password: hashedEnvPass,
-          last_login: now,
-          is_superuser: true,
-          username: envAdminEmail,
-          last_name: '',
-          email: envAdminEmail,
-          is_staff: true,
-          is_active: true,
-          date_joined: now,
-          first_name: 'Admin'
-        });
-      } else if (!adminUser.is_superuser || !verifyPassword(password, adminUser.password)) {
-        console.log('Updating existing admin user to match env settings.');
-        await db.collection('users').updateOne(
-          { _id: adminUser._id },
-          { $set: { password: hashedEnvPass, is_superuser: true, is_staff: true, is_active: true } }
-        );
-      }
-    }
-  }
-  
+
   const user = await db.collection('users').findOne({ username: cleanEmail });
   if (!user || !verifyPassword(password, user.password)) {
     throw new Error('Invalid credentials.');
@@ -1174,7 +1139,6 @@ export async function getAdminUsers() {
     first_name: u.first_name || '',
     last_name: u.last_name || '',
     is_superuser: !!u.is_superuser,
-    is_staff: !!u.is_staff,
     is_active: !!u.is_active,
     date_joined: u.date_joined,
     last_login: u.last_login
