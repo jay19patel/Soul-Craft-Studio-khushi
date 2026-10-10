@@ -1,169 +1,174 @@
 "use client";
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
-import { ShoppingBag, X, Plus, Minus, Trash2 } from 'lucide-react';
+import { useSettings } from '../context/SettingsContext';
+import { ShoppingBag, X, Plus, Minus, Trash2, Truck } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 const CartSheet = () => {
-    const router = useRouter();
-    const { isAuthenticated } = useAuth();
-    const {
-        cart,
-        isCartOpen,
-        toggleCart,
-        removeFromCart,
-        updateQuantity,
-        cartTotal,
-        isReady
-    } = useCart();
+  const router = useRouter();
+  const { isAuthenticated } = useAuth();
+  const { settings } = useSettings();
+  const { cart, isCartOpen, setIsCartOpen, removeFromCart, updateQuantity, cartTotal, isReady, notice, clearNotice } = useCart();
 
-    return (
-        <AnimatePresence>
-            {isCartOpen && (
-                <>
-                    {/* Backdrop */}
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        onClick={toggleCart}
-                        className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100]"
-                    />
+  const threshold = Number(settings.shipping?.free_shipping_threshold || 0);
+  const remainingForFree = threshold > 0 ? Math.max(0, threshold - cartTotal) : 0;
 
-                    {/* Sheet Content */}
-                    <motion.div
-                        initial={{ x: '100%' }}
-                        animate={{ x: 0 }}
-                        exit={{ x: '100%' }}
-                        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                        className="fixed right-0 inset-y-0 h-screen w-full sm:max-w-[420px] bg-white shadow-2xl z-[101] flex flex-col"
-                    >
-                        {/* Header - Solid background */}
-                        <div className="p-4 md:p-6 border-b border-slate-100 flex items-center justify-between bg-white relative z-10">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
-                                    <ShoppingBag className="w-5 h-5" />
-                                </div>
-                                <h2 className="text-lg md:text-xl font-[family-name:var(--font-climate-crisis)] uppercase text-blue-950">
-                                    Your Cart
-                                </h2>
-                            </div>
-                            <button 
-                                onClick={toggleCart}
-                                className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400 hover:text-slate-900"
-                            >
-                                <X className="w-6 h-6" />
-                            </button>
-                        </div>
+  useEffect(() => {
+    if (!isCartOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e) => e.key === 'Escape' && setIsCartOpen(false);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [isCartOpen, setIsCartOpen]);
 
-                        {/* Items List - Scrollable with solid background */}
-                        <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-white scrollbar-hide">
-                            {!isReady ? (
-                                <div className="h-full flex items-center justify-center">
-                                    <div className="w-8 h-8 border-4 border-blue-600/30 border-t-blue-600 rounded-full animate-spin" />
-                                </div>
-                            ) : cart.length === 0 ? (
-                                <div className="h-full flex flex-col items-center justify-center text-center gap-4 opacity-50">
-                                    <ShoppingBag className="w-12 md:w-16 h-12 md:h-16 text-slate-200" />
-                                    <p className="font-sans text-slate-500 text-sm">Your cart is empty</p>
-                                    <Link 
-                                        href="/shop" 
-                                        onClick={toggleCart}
-                                        className="text-[10px] font-black uppercase tracking-widest text-blue-600 hover:text-orange-500"
-                                    >
-                                        Start Shopping
-                                    </Link>
-                                </div>
-                            ) : (
-                                <div className="flex flex-col gap-6 md:gap-8">
-                                    {cart.map((item) => (
-                                        <div key={item.id} className="flex gap-4 md:gap-5 group items-start">
-                                            {/* Image */}
-                                            <div className="w-20 md:w-24 aspect-square rounded-[20px] md:rounded-[24px] overflow-hidden bg-slate-50 border border-slate-100 flex-shrink-0 shadow-sm relative">
-                                                <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
-                                                <div className="absolute top-1.5 right-1.5 bg-blue-600 text-white rounded-lg px-1.5 py-0.5 shadow-md">
-                                                    <span className="text-[10px] font-black">x{item.quantity}</span>
-                                                </div>
-                                            </div>
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(clearNotice, 5000);
+    return () => clearTimeout(t);
+  }, [notice, clearNotice]);
 
-                                            {/* Info */}
-                                            <div className="flex-grow flex flex-col gap-2 md:gap-3 py-0.5">
-                                                <div className="flex flex-col gap-0.5">
-                                                    <h3 className="text-[11px] md:text-[13px] font-[family-name:var(--font-climate-crisis)] uppercase text-blue-950 leading-tight">
-                                                        {item.name}
-                                                    </h3>
-                                                    <span className="text-xs md:text-sm font-black text-blue-600">₹{item.priceValue ?? item.price}</span>
-                                                </div>
+  const close = () => setIsCartOpen(false);
 
-                                                <div className="flex items-center justify-between mt-2">
-                                                    {/* Quantity Controls */}
-                                                    <div className="flex items-center gap-2 md:gap-3 bg-slate-100 rounded-xl px-2 py-1 md:py-1.5 border border-slate-100">
-                                                        <button 
-                                                            onClick={() => updateQuantity(item.id, -1)}
-                                                            className="p-1 hover:text-orange-500 transition-colors bg-white rounded-md shadow-sm"
-                                                        >
-                                                            <Minus className="w-2.5 h-2.5" strokeWidth={3} />
-                                                        </button>
-                                                        <span className="text-xs md:text-sm font-black text-blue-950 w-4 md:w-5 text-center">{item.quantity}</span>
-                                                        <button 
-                                                            onClick={() => updateQuantity(item.id, 1)}
-                                                            className="p-1 hover:text-orange-500 transition-colors bg-white rounded-md shadow-sm"
-                                                        >
-                                                            <Plus className="w-2.5 h-2.5" strokeWidth={3} />
-                                                        </button>
-                                                    </div>
+  const goToCheckout = () => {
+    close();
+    router.push(isAuthenticated ? '/checkout' : '/login?redirect=/checkout');
+  };
 
-                                                    {/* Remove Button */}
-                                                    <button 
-                                                        onClick={() => removeFromCart(item.id)}
-                                                        className="p-1.5 md:p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
-                                                    >
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
+  return (
+    <AnimatePresence>
+      {isCartOpen && (
+        <>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={close}
+            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100]"
+          />
 
-                        {/* Footer - Solid background fixed at bottom */}
-                        {cart.length > 0 && (
-                            <div className="p-6 md:p-8 border-t border-slate-100 bg-white shadow-[0_-10px_30px_rgba(0,0,0,0.03)] flex flex-col gap-6 z-10">
-                                <div className="flex justify-between items-center text-base md:text-lg">
-                                    <span className="text-slate-500 font-bold uppercase tracking-widest text-[10px] md:text-xs">Total Amount</span>
-                                    <span className="font-black text-blue-950">₹{cartTotal}</span>
-                                </div>
-                                <div className="flex flex-col gap-3">
-                                    <button 
-                                        onClick={() => {
-                                            toggleCart();
-                                            if (isAuthenticated) {
-                                                router.push('/checkout');
-                                            } else {
-                                                router.push('/login?redirect=/checkout');
-                                            }
-                                        }}
-                                        className="w-full bg-blue-600 text-white py-4 md:py-5 rounded-full font-black uppercase tracking-widest text-xs md:text-sm shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all active:scale-95 text-center flex items-center justify-center"
-                                    >
-                                        Checkout Now
-                                    </button>
-                                    <p className="text-[10px] text-center text-slate-400 font-black uppercase tracking-widest">
-                                        Secure transaction • Free shipping
-                                    </p>
-                                </div>
-                            </div>
-                        )}
-                    </motion.div>
-                </>
+          <motion.aside
+            initial={{ x: '100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '100%' }}
+            transition={{ type: 'spring', damping: 28, stiffness: 240 }}
+            className="fixed right-0 inset-y-0 h-[100dvh] w-full sm:max-w-[420px] bg-white shadow-2xl z-[101] flex flex-col"
+            role="dialog"
+            aria-label="Shopping cart"
+          >
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-orange-50 text-orange-600 rounded-xl">
+                  <ShoppingBag className="w-5 h-5" />
+                </div>
+                <h2 className="text-lg font-[family-name:var(--font-climate-crisis)] uppercase text-blue-950">Your Cart</h2>
+              </div>
+              <button onClick={close} className="p-2 hover:bg-slate-100 rounded-full text-slate-400 hover:text-slate-900" aria-label="Close cart">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            {threshold > 0 && cart.length > 0 && (
+              <div className="px-5 py-3 bg-emerald-50 text-emerald-800 text-xs font-bold flex items-center gap-2">
+                <Truck className="w-4 h-4 shrink-0" />
+                {remainingForFree > 0
+                  ? <>Add ₹{remainingForFree.toLocaleString('en-IN')} more for free shipping</>
+                  : <>You get free shipping on this order 🎉</>}
+              </div>
             )}
-        </AnimatePresence>
-    );
+
+            {notice && <div className="px-5 py-2.5 bg-amber-50 text-amber-800 text-xs font-bold">{notice}</div>}
+
+            <div className="flex-1 overflow-y-auto px-5 py-5">
+              {!isReady ? (
+                <div className="h-full flex items-center justify-center">
+                  <div className="w-8 h-8 border-4 border-orange-500/30 border-t-orange-500 rounded-full animate-spin" />
+                </div>
+              ) : cart.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-center gap-4">
+                  <ShoppingBag className="w-14 h-14 text-slate-200" />
+                  <p className="text-slate-500 text-sm">Your cart is empty</p>
+                  <Link href="/shop" onClick={close} className="px-6 py-3 rounded-full bg-orange-500 text-white text-xs font-black uppercase tracking-widest">
+                    Start shopping
+                  </Link>
+                </div>
+              ) : (
+                <ul className="flex flex-col gap-5">
+                  {cart.map((item) => (
+                    <li key={item.id} className="flex gap-4">
+                      <Link href={`/shop/${item.id}`} onClick={close} className="w-20 h-20 rounded-2xl overflow-hidden bg-slate-50 border border-slate-100 shrink-0">
+                        {item.image ? <img src={item.image} alt={item.name} className="w-full h-full object-cover" /> : null}
+                      </Link>
+                      <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                        <Link href={`/shop/${item.id}`} onClick={close} className="text-sm font-bold text-blue-950 leading-tight line-clamp-2">
+                          {item.name}
+                        </Link>
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-sm font-black text-orange-600">₹{Number(item.price).toLocaleString('en-IN')}</span>
+                          {item.mrp > item.price && <span className="text-xs text-slate-400 line-through">₹{Number(item.mrp).toLocaleString('en-IN')}</span>}
+                        </div>
+                        <div className="flex items-center justify-between mt-1">
+                          <div className="flex items-center bg-slate-100 rounded-xl">
+                            <button
+                              onClick={() => updateQuantity(item.id, -1)}
+                              disabled={item.quantity <= 1}
+                              className="w-9 h-9 flex items-center justify-center text-slate-600 disabled:opacity-30"
+                              aria-label="Decrease quantity"
+                            >
+                              <Minus className="w-3.5 h-3.5" strokeWidth={3} />
+                            </button>
+                            <span className="w-7 text-center text-sm font-black text-blue-950">{item.quantity}</span>
+                            <button
+                              onClick={() => updateQuantity(item.id, 1)}
+                              disabled={item.quantity >= Math.min(20, item.stock ?? 20)}
+                              className="w-9 h-9 flex items-center justify-center text-slate-600 disabled:opacity-30"
+                              aria-label="Increase quantity"
+                            >
+                              <Plus className="w-3.5 h-3.5" strokeWidth={3} />
+                            </button>
+                          </div>
+                          <button onClick={() => removeFromCart(item.id)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl" aria-label="Remove item">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                        {item.stock > 0 && item.stock <= 3 && (
+                          <span className="text-[10px] font-bold text-amber-600">Only {item.stock} left</span>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {cart.length > 0 && (
+              <div className="px-5 pt-4 pb-safe border-t border-slate-100 bg-white flex flex-col gap-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 font-bold uppercase tracking-widest text-xs">Subtotal</span>
+                  <span className="font-black text-lg text-blue-950">₹{cartTotal.toLocaleString('en-IN')}</span>
+                </div>
+                <p className="text-[11px] text-slate-400 -mt-2">Shipping & payment options at checkout</p>
+                <button
+                  onClick={goToCheckout}
+                  className="w-full bg-orange-500 hover:bg-orange-600 text-white py-4 rounded-full font-black uppercase tracking-widest text-sm shadow-xl shadow-orange-100 transition-all active:scale-[0.98]"
+                >
+                  Checkout
+                </button>
+              </div>
+            )}
+          </motion.aside>
+        </>
+      )}
+    </AnimatePresence>
+  );
 };
 
 export default CartSheet;

@@ -7,6 +7,8 @@ import path from 'path';
  * @param {Object} order The normalized order object.
  * @returns {Promise<Buffer>} The generated PDF binary buffer.
  */
+const PAYMENT_LABELS = { UPI: 'UPI', COD: 'Cash on Delivery' };
+
 export async function generateInvoicePdf(order) {
   return new Promise((resolve, reject) => {
     try {
@@ -59,8 +61,9 @@ export async function generateInvoicePdf(order) {
       doc.fillColor('#302d2a');
       doc.text('Invoice Details', 40, metaY);
       doc.font('Roboto').fontSize(9).fillColor('#716b64');
-      doc.text(`Invoice number: SCS-${order.id}`, 40, metaY + 15);
-      doc.text(`Invoice date: ${order.date || new Date(order.created_at).toLocaleDateString('en-IN')}`, 40, metaY + 28);
+      doc.text(`Invoice number: ${order.order_number || `SCS-${order.id}`}`, 40, metaY + 15);
+      doc.text(`Invoice date: ${new Date(order.created_at || Date.now()).toLocaleDateString('en-IN')}`, 40, metaY + 28);
+      doc.text(`Payment: ${PAYMENT_LABELS[order.payment_method] || order.payment_method || '-'} (${order.payment_status || 'PENDING'})`, 40, metaY + 41);
       
       doc.moveDown(3);
       
@@ -99,8 +102,27 @@ export async function generateInvoicePdf(order) {
       }
       
       doc.strokeColor('#e7e2d9').moveTo(40, doc.y).lineTo(550, doc.y).stroke();
-      doc.moveDown(1);
-      
+      doc.moveDown(0.6);
+
+      // Totals
+      const totalsRows = [
+        ['Subtotal', Number(order.subtotal ?? order.total_amount ?? 0)],
+        ['Shipping', Number(order.shipping_fee || 0)],
+      ];
+      if (Number(order.cod_fee) > 0) totalsRows.push(['COD charge', Number(order.cod_fee)]);
+      doc.font('Roboto').fontSize(9).fillColor('#716b64');
+      for (const [label, value] of totalsRows) {
+        const rowY = doc.y;
+        doc.text(label, 360, rowY, { width: 80, align: 'right' });
+        doc.text(value === 0 && label === 'Shipping' ? 'Free' : `Rs. ${value.toFixed(2)}`, 460, rowY, { width: 90, align: 'right' });
+        doc.moveDown(0.6);
+      }
+      const totalY = doc.y;
+      doc.font('Roboto-Bold').fontSize(11).fillColor('#302d2a');
+      doc.text('Total', 360, totalY, { width: 80, align: 'right' });
+      doc.fillColor('#c65d30').text(`Rs. ${Number(order.total_amount || 0).toFixed(2)}`, 460, totalY, { width: 90, align: 'right' });
+      doc.moveDown(1.5);
+
       // Address and Payment Grid
       const gridY = doc.y;
       
@@ -129,9 +151,11 @@ export async function generateInvoicePdf(order) {
       doc.font('Roboto').fillColor('#716b64').text('Total amount', 300, gridY + 75);
       doc.font('Roboto-Bold').fillColor('#c65d30').fontSize(12).text(`Rs. ${Number(order.total_amount).toFixed(2)}`, 300, gridY + 85);
       
-      doc.moveDown(8);
+      doc.y = Math.max(doc.y, gridY + 110);
+      doc.moveDown(1);
       
       // Footer text
+      doc.x = 40;
       doc.strokeColor('#e7e2d9').lineWidth(0.5).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
       doc.moveDown(0.8);
       

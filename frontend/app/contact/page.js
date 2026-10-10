@@ -22,11 +22,11 @@ export default function ContactPage() {
                 {/* Header Section */}
                 <section className="text-center flex flex-col items-center gap-6 max-w-2xl">
                     <span className="text-orange-600 font-extrabold tracking-widest uppercase text-sm">Get in Touch</span>
-                    <h1 className="text-5xl md:text-6xl font-[family-name:var(--font-climate-crisis)] uppercase text-blue-950 leading-tight">
-                        Let's create something <br /> <span className="text-orange-500">Together.</span>
+                    <h1 className="text-4xl md:text-6xl font-[family-name:var(--font-climate-crisis)] uppercase text-blue-950 leading-tight">
+                        Let&apos;s create something <br /> <span className="text-orange-500">Together.</span>
                     </h1>
                     <p className="text-lg text-slate-500 font-medium leading-relaxed">
-                        Have a question, a custom request, or just want to say hello? Use the form below, and we'll get back to you within 24-48 hours.
+                        Have a question, a custom request, or just want to say hello? Use the form below, and we&apos;ll get back to you within 24-48 hours.
                     </p>
                 </section>
 

@@ -1,6 +1,8 @@
 import { Geist, Climate_Crisis } from "next/font/google";
 import "./globals.css";
+import { AuthProvider } from "../context/AuthContext";
 import { CartProvider } from "../context/CartContext";
+import { SettingsProvider } from "../context/SettingsContext";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -13,14 +15,26 @@ const climateCrisis = Climate_Crisis({
 });
 
 export const metadata = {
-  title: "Soul Craft Studio | Handcrafted Wool Art",
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://soulcraftstudio.vercel.app'),
+  title: {
+    default: "Soul Craft Studio | Handcrafted Wool Art",
+    template: "%s | Soul Craft Studio",
+  },
   description: "Discover our exclusive collection of handcrafted wool art, decorations, and unique keychains that tell a story.",
   icons: {
     icon: '/favicon.ico',
   },
+  openGraph: {
+    type: 'website',
+    siteName: 'Soul Craft Studio',
+  },
 };
 
-import { AuthProvider } from "../context/AuthContext";
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  themeColor: '#f97316',
+};
 
 export default function RootLayout({ children }) {
   return (
@@ -29,13 +43,14 @@ export default function RootLayout({ children }) {
       className={`${geistSans.variable} ${climateCrisis.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <AuthProvider>
-          <CartProvider>
-            {children}
-          </CartProvider>
-        </AuthProvider>
+        <SettingsProvider>
+          <AuthProvider>
+            <CartProvider>
+              {children}
+            </CartProvider>
+          </AuthProvider>
+        </SettingsProvider>
       </body>
-
     </html>
   );
 }

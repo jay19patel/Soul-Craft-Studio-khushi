@@ -9,13 +9,14 @@ import { User, Lock, Save, AlertCircle, CheckCircle2, MapPin, Phone, Plus, Star,
 import { getAddresses, addAddress, setDefaultAddress, getContacts, addContact, setDefaultContact, getMyTestimonial, submitTestimonial } from '../../lib/api';
 
 export default function ProfilePage() {
-  const { user, isAuthenticated, updateUserProfile } = useAuth();
+  const { user, isAuthenticated, loading: authLoading, updateUserProfile } = useAuth();
   const router = useRouter();
 
   const [activeTab, setActiveTab] = useState('profile'); // profile, addresses, contacts, feedback
 
   const [formData, setFormData] = useState({
     full_name: '',
+    current_password: '',
     password: '',
     confirm_password: '',
   });
@@ -61,10 +62,11 @@ export default function ProfilePage() {
     }
   }, [isAuthenticated]);
 
-  if (!isAuthenticated) {
-    if (typeof window !== 'undefined') router.push('/login');
-    return null;
-  }
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) router.replace('/login?redirect=/profile');
+  }, [authLoading, isAuthenticated, router]);
+
+  if (!isAuthenticated) return null;
 
   // --- Profile Logic ---
   const handleProfileChange = (e) => {
@@ -84,7 +86,12 @@ export default function ProfilePage() {
     setLoading(true);
     const payload = { full_name: formData.full_name };
     if (formData.password) {
+      if (formData.password.length < 8) {
+        setError('New password must be at least 8 characters.');
+        return;
+      }
       payload.password = formData.password;
+      payload.current_password = formData.current_password;
     }
 
     const result = await updateUserProfile(payload);
@@ -92,7 +99,7 @@ export default function ProfilePage() {
 
     if (result.success) {
       setSuccess('Profile updated successfully!');
-      setFormData((prev) => ({ ...prev, password: '', confirm_password: '' }));
+      setFormData((prev) => ({ ...prev, current_password: '', password: '', confirm_password: '' }));
     } else {
       setError(result.error || 'Failed to update profile');
     }
@@ -195,8 +202,8 @@ export default function ProfilePage() {
     setIsSavingFeedback(true);
     setFeedbackSuccess('');
     try {
-      await submitTestimonial(feedbackForm);
-      setFeedbackSuccess(myTestimonial ? 'Your feedback has been updated!' : 'Thanks for your feedback! It now appears in Customer Stories.');
+      const saved = await submitTestimonial(feedbackForm);
+      setFeedbackSuccess(saved?.pending ? 'Thank you! Your review will appear in Customer Stories once we approve it.' : 'Thanks for your feedback! It now appears in Customer Stories.');
       fetchMyTestimonial();
     } catch (err) {
       console.error(err);
@@ -258,6 +265,13 @@ export default function ProfilePage() {
                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-4">New Password</label>
                   <input name="password" type="password" value={formData.password} onChange={handleProfileChange} placeholder="Leave blank to keep current" className="w-full bg-slate-50 rounded-2xl py-4 px-4 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
+
+                {formData.password && (
+                  <div className="flex flex-col gap-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-4">Current Password</label>
+                    <input name="current_password" type="password" required value={formData.current_password} onChange={handleProfileChange} autoComplete="current-password" className="w-full bg-slate-50 rounded-2xl py-4 px-4 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                  </div>
+                )}
 
                 {formData.password && (
                   <div className="flex flex-col gap-2">

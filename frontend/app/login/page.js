@@ -7,13 +7,14 @@ import Link from 'next/link';
 import { useAuth } from '../../context/AuthContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { LogIn, Mail, Lock, AlertCircle } from 'lucide-react';
+import { safeRedirect } from '../../lib/constants';
 
 function LoginPageContent() {
   const { login } = useAuth();
   const router = useRouter();
 
   const searchParams = useSearchParams();
-  const redirectPath = searchParams.get('redirect') || '/';
+  const redirectPath = safeRedirect(searchParams.get('redirect'));
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -27,7 +28,7 @@ function LoginPageContent() {
     try {
       const result = await login(email, password);
       if (result.success) {
-        router.push(redirectPath);
+        router.replace(redirectPath);
       } else {
         setError(result.error || 'Invalid email or password');
       }

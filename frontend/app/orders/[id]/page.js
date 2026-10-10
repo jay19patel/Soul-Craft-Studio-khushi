@@ -1,334 +1,256 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import { useParams } from 'next/navigation';
-import Navbar from '../../../components/Navbar';
-import Footer from '../../../components/Footer';
+import React, { Suspense, useCallback, useEffect, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
-  ChevronLeft, Package, Truck, CheckCircle, Clock, X,
-  MapPin, CreditCard, ShieldCheck, Printer
+  ChevronLeft, Package, Truck, CheckCircle, Clock, X, MapPin, CreditCard, Download, Loader2, Hammer, ShieldCheck, ExternalLink,
 } from 'lucide-react';
-import { getOrder, normalizeOrder } from '../../../lib/api';
+import Navbar from '../../../components/Navbar';
+import Footer from '../../../components/Footer';
+import { StatusBadge, PaymentBadge } from '../../../components/OrderStatusBadges';
+import { getOrder, cancelMyOrder } from '../../../lib/api';
+import { useAuth } from '../../../context/AuthContext';
+import { PAYMENT_METHOD_LABEL } from '../../../lib/constants';
 
-// ── Status config ──────────────────────────────────────────────────────────
-const STATUS_CONFIG = {
-  pending:    { Icon: Clock,       color: 'text-orange-500', bg: 'bg-orange-50 border-orange-100',  label: 'Pending' },
-  processing: { Icon: Clock,       color: 'text-yellow-500', bg: 'bg-yellow-50 border-yellow-100',  label: 'Processing' },
-  shipped:    { Icon: Truck,       color: 'text-blue-500',   bg: 'bg-blue-50 border-blue-100',      label: 'Shipped' },
-  delivered:  { Icon: CheckCircle, color: 'text-green-500',  bg: 'bg-green-50 border-green-100',    label: 'Delivered' },
-  cancelled:  { Icon: X,           color: 'text-red-400',    bg: 'bg-red-50 border-red-100',        label: 'Cancelled' },
-};
+const STEPS = [
+  { key: 'PENDING', label: 'Order placed', icon: Package, field: 'created_at' },
+  { key: 'CONFIRMED', label: 'Confirmed', icon: ShieldCheck, field: 'confirmed_at' },
+  { key: 'PROCESSING', label: 'Being crafted', icon: Hammer, field: 'processing_at' },
+  { key: 'SHIPPED', label: 'Shipped', icon: Truck, field: 'shipped_at' },
+  { key: 'DELIVERED', label: 'Delivered', icon: CheckCircle, field: 'delivered_at' },
+];
 
-const PAYMENT_STATUS_CONFIG = {
-  pending: { label: 'Payment pending', color: 'text-slate-600 bg-slate-50 border-slate-100' },
-  received: { label: 'Awaiting verification', color: 'text-orange-600 bg-orange-50 border-orange-100' },
-  verified: { label: 'Verified', color: 'text-green-600 bg-green-50 border-green-100' },
-  failed: { label: 'Failed', color: 'text-red-500 bg-red-50 border-red-100' },
-};
+const fmt = (d) => (d ? new Date(d).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '');
 
-const OrderDetailPage = () => {
+function OrderDetail() {
   const { id } = useParams();
+  const router = useRouter();
+  const { isAuthenticated, loading: authLoading } = useAuth();
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState('');
+  const [message, setMessage] = useState('');
 
-  useEffect(() => {
-    if (!id) return;
-    setLoading(true);
-    getOrder(id)
-      .then((raw) => setOrder(normalizeOrder(raw)))
-      .catch((err) => setError(err.message || 'Order not found.'))
-      .finally(() => setLoading(false));
+  const load = useCallback(async () => {
+    try {
+      setOrder(await getOrder(id));
+      setError('');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   }, [id]);
 
-  // ── Loading ──────────────────────────────────────────────────────────────
-  if (loading) {
+  useEffect(() => {
+    if (authLoading) return;
+    if (!isAuthenticated) {
+      router.replace(`/login?redirect=/orders/${id}`);
+      return;
+    }
+    load();
+  }, [authLoading, isAuthenticated, id, load, router]);
+
+  const cancel = async () => {
+    if (!window.confirm('Cancel this order?')) return;
+    setBusy('cancel');
+    try {
+      setOrder(await cancelMyOrder(id, 'Cancelled by customer'));
+      setMessage('Your order has been cancelled.');
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  if (loading || authLoading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col">
-        <Navbar />
-        <main className="flex-grow flex items-center justify-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500" />
-        </main>
-        <Footer />
-      </div>
+      <main className="flex-grow flex items-center justify-center py-32">
+        <Loader2 className="w-10 h-10 text-orange-500 animate-spin" />
+      </main>
     );
   }
 
-  // ── Error ────────────────────────────────────────────────────────────────
   if (error || !order) {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col">
-        <Navbar />
-        <main className="flex-grow flex flex-col items-center justify-center gap-6 text-center px-4">
-          <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center">
-            <Package className="w-10 h-10 text-slate-300" />
-          </div>
-          <h1 className="text-3xl font-[family-name:var(--font-climate-crisis)] uppercase text-blue-950">
-            Order Not Found
-          </h1>
-          <p className="text-slate-500 max-w-sm">{error || 'This order does not exist.'}</p>
-          <Link href="/orders" className="bg-blue-600 text-white px-8 py-3 rounded-full font-black uppercase tracking-widest text-sm shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all">
-            My Orders
-          </Link>
-        </main>
-        <Footer />
-      </div>
+      <main className="flex-grow flex flex-col items-center justify-center gap-6 text-center px-4 py-24">
+        <Package className="w-14 h-14 text-slate-300" />
+        <h1 className="text-3xl font-[family-name:var(--font-climate-crisis)] uppercase text-blue-950">Order not found</h1>
+        <p className="text-slate-500 max-w-sm">{error || 'This order does not exist.'}</p>
+        <Link href="/orders" className="bg-blue-600 text-white px-8 py-3 rounded-full font-black uppercase tracking-widest text-sm">My orders</Link>
+      </main>
     );
   }
 
-  const statusCfg = STATUS_CONFIG[order.status?.toLowerCase()] ?? STATUS_CONFIG.pending;
-  const StatusIcon = statusCfg.Icon;
-  const paymentCfg = PAYMENT_STATUS_CONFIG[order.payment_status?.toLowerCase()] ?? PAYMENT_STATUS_CONFIG.pending;
+  const cancelled = order.status === 'CANCELLED';
+  const currentIdx = STEPS.findIndex((s) => s.key === order.status);
+  const canCancel = ['PENDING', 'CONFIRMED'].includes(order.status) && order.payment_status !== 'VERIFIED';
+  const tracking = order.tracking || {};
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
-      <Navbar />
+    <main className="flex-grow w-full max-w-5xl mx-auto px-4 py-6 md:py-14">
+      <Link href="/orders" className="inline-flex items-center gap-1 text-xs font-black uppercase tracking-widest text-slate-400 hover:text-orange-500 mb-5">
+        <ChevronLeft className="w-4 h-4" /> My orders
+      </Link>
 
-      <main className="flex-grow w-full max-w-4xl mx-auto px-4 py-12 md:py-20">
-        <div className="flex flex-col gap-8">
-          {/* Back */}
-          <Link
-            href="/orders"
-            className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-400 hover:text-orange-500 w-fit transition-colors"
+      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl md:text-4xl font-[family-name:var(--font-climate-crisis)] uppercase text-blue-950">{order.order_number}</h1>
+          <p className="text-sm text-slate-500 mt-1">Placed {fmt(order.created_at)}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge status={order.status} />
+          <PaymentBadge status={order.payment_status} method={order.payment_method} />
+          <a
+            href={`/orders/${order.id}/invoice`}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-950 text-white text-[11px] font-black uppercase tracking-widest"
           >
-            <ChevronLeft className="w-4 h-4" />
-            My Orders
-          </Link>
+            <Download className="w-3.5 h-3.5" /> Invoice
+          </a>
+        </div>
+      </div>
 
-          {/* Title + Status */}
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="flex flex-col gap-2">
-              <h1 className="text-4xl font-[family-name:var(--font-climate-crisis)] uppercase text-blue-950">
-                Order Details.
-              </h1>
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 font-mono">
-                ID: {order.id}
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className={`flex items-center gap-2 px-5 py-3 rounded-full border ${statusCfg.bg}`}>
-                <StatusIcon className={`w-4 h-4 ${statusCfg.color}`} />
-                <span className={`text-[10px] font-black uppercase tracking-widest ${statusCfg.color}`}>
-                  {statusCfg.label}
-                </span>
+      {message && <div className="mb-5 rounded-2xl bg-blue-50 border border-blue-100 text-blue-900 text-sm font-semibold p-4">{message}</div>}
+
+      {order.payment_method === 'UPI' && order.payment_status === 'RECEIVED' && !cancelled && (
+        <div className="mb-6 rounded-3xl bg-blue-50 border border-blue-100 p-5 text-sm text-blue-900">
+          <strong>We are verifying your UPI payment</strong> (UTR {order.upi_transaction_id}). You will get an email as soon as it is confirmed.
+        </div>
+      )}
+
+      {order.payment_status === 'FAILED' && order.payment_method === 'UPI' && !cancelled && (
+        <div className="mb-6 rounded-3xl bg-red-50 border border-red-100 p-5 text-sm text-red-800">
+          We could not find this UPI payment. Please <Link href="/contact" className="underline font-bold">contact us</Link> with your payment screenshot.
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="md:col-span-2 flex flex-col gap-5">
+          {/* Progress */}
+          <section className="bg-white rounded-3xl border border-slate-100 shadow-sm p-5 md:p-7">
+            <h2 className="text-xs font-black uppercase tracking-[0.2em] text-blue-950 mb-5">Order tracking</h2>
+            {cancelled ? (
+              <div className="flex items-start gap-4">
+                <span className="w-9 h-9 rounded-full bg-red-500 text-white flex items-center justify-center shrink-0"><X className="w-4 h-4" /></span>
+                <div>
+                  <p className="font-black text-red-700">Cancelled</p>
+                  <p className="text-sm text-slate-500">{order.cancel_reason} · {fmt(order.cancelled_at)}</p>
+                  {order.payment_status === 'VERIFIED' && <p className="text-sm text-slate-600 mt-1">Your refund will be processed to the original payment method.</p>}
+                </div>
               </div>
-              <Link
-                href={`/orders/${order.id}/invoice`}
-                target="_blank"
-                className="flex items-center gap-2 px-5 py-3 rounded-full bg-blue-600 text-white shadow-lg shadow-blue-200 hover:bg-blue-700 hover:shadow-xl transition-all active:scale-95"
-              >
-                <Printer className="w-4 h-4" />
-                <span className="text-[10px] font-black uppercase tracking-widest">Download Invoice</span>
-              </Link>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Main column */}
-            <div className="md:col-span-2 flex flex-col gap-6">
-              {/* Items */}
-              <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm p-6 md:p-8 flex flex-col gap-6">
-                <h2 className="text-xs font-black uppercase tracking-[0.2em] text-blue-950 pb-4 border-b border-slate-50">
-                  Items Ordered
-                </h2>
-                <div className="flex flex-col gap-5">
-                  {(order.items || []).map((item, idx) => (
-                    <div key={idx} className="flex items-center gap-4">
-                      <div className="w-16 h-16 rounded-2xl bg-slate-50 border border-slate-100 overflow-hidden flex-shrink-0">
-                        {item.image ? (
-                          <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <Package className="w-6 h-6 text-slate-300" />
+            ) : (
+              <ol className="relative flex flex-col gap-0">
+                {STEPS.map((step, idx) => {
+                  const done = idx <= currentIdx;
+                  const Icon = step.icon;
+                  return (
+                    <li key={step.key} className="flex gap-4 relative pb-6 last:pb-0">
+                      {idx < STEPS.length - 1 && <span className={`absolute left-[17px] top-9 bottom-0 w-0.5 ${idx < currentIdx ? 'bg-emerald-400' : 'bg-slate-100'}`} />}
+                      <span className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 z-10 ${done ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                        <Icon className="w-4 h-4" />
+                      </span>
+                      <div className="pt-1.5">
+                        <p className={`text-sm font-black uppercase tracking-wider ${done ? 'text-blue-950' : 'text-slate-400'}`}>{step.label}</p>
+                        {order[step.field] && done && <p className="text-xs text-slate-500">{fmt(order[step.field])}</p>}
+                        {step.key === 'SHIPPED' && done && (tracking.courier || tracking.tracking_number) && (
+                          <div className="mt-2 text-xs bg-violet-50 border border-violet-100 rounded-xl px-3 py-2 text-violet-900">
+                            {tracking.courier && <span className="font-bold">{tracking.courier}</span>}
+                            {tracking.tracking_number && <span> · {tracking.tracking_number}</span>}
+                            {tracking.tracking_url && (
+                              <a href={tracking.tracking_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 font-bold underline mt-1">
+                                Track shipment <ExternalLink className="w-3 h-3" />
+                              </a>
+                            )}
                           </div>
                         )}
                       </div>
-                      <div className="flex-grow flex flex-col gap-1">
-                        <p className="text-sm font-black uppercase text-blue-950">{item.name}</p>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                          Qty: {item.quantity}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm font-black text-blue-950">
-                          ₹{(Number(item.price ?? 0) * item.quantity).toLocaleString('en-IN')}
-                        </p>
-                        <p className="text-[10px] text-slate-400">@₹{Number(item.price ?? 0).toLocaleString('en-IN')}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+          </section>
 
-                {/* Total */}
-                <div className="border-t border-slate-50 pt-5 flex justify-between items-center">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Grand Total</span>
-                  <span className="text-xl font-black text-blue-600">
-                    ₹{(order.total_amount ?? 0).toLocaleString('en-IN')}
-                  </span>
-                </div>
-              </div>
-
-              {/* Order Timeline Tracker */}
-              <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm p-6 md:p-8 flex flex-col gap-6">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-500">
-                    <Clock className="w-5 h-5" />
+          {/* Items */}
+          <section className="bg-white rounded-3xl border border-slate-100 shadow-sm p-5 md:p-7">
+            <h2 className="text-xs font-black uppercase tracking-[0.2em] text-blue-950 mb-5">Items</h2>
+            <ul className="flex flex-col gap-4">
+              {order.items.map((item) => (
+                <li key={item.id} className="flex items-center gap-4">
+                  <div className="w-16 h-16 rounded-2xl bg-slate-50 border border-slate-100 overflow-hidden shrink-0">
+                    {item.image ? <img src={item.image} alt="" className="w-full h-full object-cover" /> : <Package className="w-6 h-6 m-5 text-slate-300" />}
                   </div>
-                  <h2 className="text-xs font-black uppercase tracking-[0.2em] text-blue-950">Order Tracking</h2>
-                </div>
-                
-                <div className="flex flex-col gap-0 pl-4 md:pl-6 relative mt-2">
-                  <div className="absolute left-[31px] md:left-[39px] top-4 bottom-4 w-[2px] bg-slate-100" />
-
-                  {/* 1. Order Placed */}
-                  <div className={`flex items-start gap-6 relative z-10 py-4 ${order.date ? 'opacity-100' : 'opacity-40 grayscale'} ${order.status === 'CANCELLED' ? 'opacity-50 grayscale' : ''}`}>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${order.date && order.status !== 'CANCELLED' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'bg-slate-200 text-slate-400'}`}>
-                      <Package className="w-4 h-4" />
-                    </div>
-                    <div className="flex flex-col gap-1 pt-1">
-                      <p className={`text-sm font-black uppercase tracking-wider ${order.date && order.status !== 'CANCELLED' ? 'text-indigo-950' : 'text-slate-500'}`}>Order Placed</p>
-                      <p className="text-xs font-bold text-slate-400">{order.date || 'Pending'}</p>
-                    </div>
+                  <div className="flex-1 min-w-0">
+                    {item.product_id ? (
+                      <Link href={`/shop/${item.product_id}`} className="text-sm font-bold text-blue-950 line-clamp-2 hover:text-orange-600">{item.name}</Link>
+                    ) : (
+                      <p className="text-sm font-bold text-blue-950">{item.name}</p>
+                    )}
+                    <p className="text-xs text-slate-500">Qty {item.quantity} × ₹{item.price.toLocaleString('en-IN')}</p>
                   </div>
-
-                  {/* 2. Payment Verified */}
-                  <div className={`flex items-start gap-6 relative z-10 py-4 ${order.payment_verified_date ? 'opacity-100' : 'opacity-40 grayscale'} ${order.status === 'CANCELLED' ? 'opacity-50 grayscale' : ''}`}>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${order.payment_verified_date && order.status !== 'CANCELLED' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-200' : 'bg-slate-200 text-slate-400'}`}>
-                      <ShieldCheck className="w-4 h-4" />
-                    </div>
-                    <div className="flex flex-col gap-1 pt-1">
-                      <p className={`text-sm font-black uppercase tracking-wider ${order.payment_verified_date && order.status !== 'CANCELLED' ? 'text-emerald-950' : 'text-slate-500'}`}>Payment Verified</p>
-                      <p className="text-xs font-bold text-slate-400">{order.payment_verified_date || 'Awaiting verification'}</p>
-                    </div>
-                  </div>
-
-                  {/* 3. Processing */}
-                  <div className={`flex items-start gap-6 relative z-10 py-4 ${order.processing_date ? 'opacity-100' : 'opacity-40 grayscale'} ${order.status === 'CANCELLED' ? 'opacity-50 grayscale' : ''}`}>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${order.processing_date && order.status !== 'CANCELLED' ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'bg-slate-200 text-slate-400'}`}>
-                      <Clock className="w-4 h-4" />
-                    </div>
-                    <div className="flex flex-col gap-1 pt-1">
-                      <p className={`text-sm font-black uppercase tracking-wider ${order.processing_date && order.status !== 'CANCELLED' ? 'text-orange-950' : 'text-slate-500'}`}>Processing</p>
-                      <p className="text-xs font-bold text-slate-400">{order.processing_date || 'Awaiting processing'}</p>
-                    </div>
-                  </div>
-
-                  {/* 4. Shipped */}
-                  <div className={`flex items-start gap-6 relative z-10 py-4 ${order.shipped_date ? 'opacity-100' : 'opacity-40 grayscale'} ${order.status === 'CANCELLED' ? 'hidden' : ''}`}>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${order.shipped_date ? 'bg-blue-500 text-white shadow-lg shadow-blue-200' : 'bg-slate-200 text-slate-400'}`}>
-                      <Truck className="w-4 h-4" />
-                    </div>
-                    <div className="flex flex-col gap-1 pt-1">
-                      <p className={`text-sm font-black uppercase tracking-wider ${order.shipped_date ? 'text-blue-950' : 'text-slate-500'}`}>Shipped</p>
-                      <p className="text-xs font-bold text-slate-400">{order.shipped_date || 'Pending shipment'}</p>
-                    </div>
-                  </div>
-
-                  {/* 5. Delivered */}
-                  <div className={`flex items-start gap-6 relative z-10 py-4 ${order.delivered_date ? 'opacity-100' : 'opacity-40 grayscale'} ${order.status === 'CANCELLED' ? 'hidden' : ''}`}>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${order.delivered_date ? 'bg-green-500 text-white shadow-lg shadow-green-200' : 'bg-slate-200 text-slate-400'}`}>
-                      <CheckCircle className="w-4 h-4" />
-                    </div>
-                    <div className="flex flex-col gap-1 pt-1">
-                      <p className={`text-sm font-black uppercase tracking-wider ${order.delivered_date ? 'text-green-950' : 'text-slate-500'}`}>Delivered</p>
-                      <p className="text-xs font-bold text-slate-400">{order.delivered_date || 'Awaiting delivery'}</p>
-                    </div>
-                  </div>
-
-                  {/* Cancelled State Overlay (if cancelled) */}
-                  {order.status === 'CANCELLED' && (
-                    <div className="flex items-start gap-6 relative z-10 py-4 opacity-100">
-                      <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-red-500 text-white shadow-lg shadow-red-200">
-                        <X className="w-4 h-4" />
-                      </div>
-                      <div className="flex flex-col gap-1 pt-1">
-                        <p className="text-sm font-black uppercase tracking-wider text-red-950">Cancelled</p>
-                        <p className="text-xs font-bold text-slate-400">{order.cancelled_date || 'Order was cancelled'}</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Shipping Address */}
-              <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm p-6 md:p-8 flex flex-col gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-orange-50 rounded-2xl flex items-center justify-center text-orange-500">
-                    <MapPin className="w-5 h-5" />
-                  </div>
-                  <h2 className="text-xs font-black uppercase tracking-[0.2em] text-blue-950">Shipping Address</h2>
-                </div>
-                <div className="text-sm text-slate-600 leading-relaxed pl-1">
-                  <p className="font-black text-blue-950">{order.customer_name}</p>
-                  {order.shipping_address && <p>{order.shipping_address}</p>}
-                  {order.customer_phone && (
-                    <p className="text-slate-400 mt-1">📞 {order.customer_phone}</p>
-                  )}
-                </div>
-              </div>
+                  <span className="text-sm font-black text-blue-950">₹{item.line_total.toLocaleString('en-IN')}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="border-t border-slate-100 mt-5 pt-4 flex flex-col gap-2 text-sm">
+              <div className="flex justify-between"><span className="text-slate-500">Subtotal</span><span className="font-bold">₹{order.subtotal.toLocaleString('en-IN')}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">Shipping</span><span className="font-bold">{order.shipping_fee ? `₹${order.shipping_fee}` : 'Free'}</span></div>
+              {order.cod_fee > 0 && <div className="flex justify-between"><span className="text-slate-500">COD charge</span><span className="font-bold">₹{order.cod_fee}</span></div>}
+              <div className="flex justify-between text-base pt-2 border-t border-slate-100"><span className="font-black text-blue-950">Total</span><span className="font-black text-orange-600">₹{order.total_amount.toLocaleString('en-IN')}</span></div>
             </div>
-
-            {/* Sidebar */}
-            <div className="flex flex-col gap-6">
-              {/* Customer info */}
-              <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm p-6 flex flex-col gap-4">
-                <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Customer</h2>
-                <div className="flex flex-col gap-1">
-                  <p className="text-sm font-black text-blue-950">{order.customer_name}</p>
-                  <p className="text-xs text-slate-500">{order.customer_email}</p>
-                </div>
-              </div>
-
-              {/* Payment */}
-              <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm p-6 flex flex-col gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-500">
-                    <CreditCard className="w-5 h-5" />
-                  </div>
-                  <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Payment</h2>
-                </div>
-                <div className="flex flex-col gap-3">
-                  <div className={`px-3 py-2 rounded-xl border text-[10px] font-black uppercase tracking-widest inline-flex items-center gap-2 ${paymentCfg.color}`}>
-                    <ShieldCheck className="w-3.5 h-3.5" />
-                    {paymentCfg.label}
-                  </div>
-                  {order.payment_reference && (
-                    <div className="flex flex-col gap-1">
-                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Payment Reference</span>
-                      <span className="text-xs font-mono text-slate-600 break-all">{order.payment_reference}</span>
-                    </div>
-                  )}
-                  {order.upi_transaction_id && (
-                    <div className="flex flex-col gap-1">
-                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">UPI Transaction ID</span>
-                      <span className="text-xs font-mono text-slate-600 break-all">{order.upi_transaction_id}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Order date */}
-              <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm p-6 flex flex-col gap-2">
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Placed On</span>
-                <span className="text-sm font-bold text-slate-700">{order.date}</span>
-              </div>
-
-              {/* Notes */}
-              {order.notes && (
-                <div className="bg-orange-50 rounded-[32px] border border-orange-100 p-6 flex flex-col gap-2">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-orange-600">Notes</span>
-                  <p className="text-sm text-orange-900">{order.notes}</p>
-                </div>
-              )}
-            </div>
-          </div>
+          </section>
         </div>
-      </main>
 
+        <div className="flex flex-col gap-5">
+          <section className="bg-white rounded-3xl border border-slate-100 shadow-sm p-5 flex flex-col gap-3">
+            <h2 className="text-[11px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2"><MapPin className="w-4 h-4" /> Delivery address</h2>
+            <p className="text-sm leading-relaxed text-slate-700">
+              <span className="font-bold text-blue-950">{order.customer_name}</span><br />
+              {order.shipping_address}<br />
+              {order.customer_phone && <>📞 {order.customer_phone}</>}
+            </p>
+          </section>
+
+          <section className="bg-white rounded-3xl border border-slate-100 shadow-sm p-5 flex flex-col gap-3">
+            <h2 className="text-[11px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2"><CreditCard className="w-4 h-4" /> Payment</h2>
+            <p className="text-sm font-bold text-blue-950">{PAYMENT_METHOD_LABEL[order.payment_method]}</p>
+            <PaymentBadge status={order.payment_status} method={order.payment_method} className="w-fit" />
+            {order.upi_transaction_id && <p className="text-xs text-slate-500 break-all">UTR: {order.upi_transaction_id}</p>}
+          </section>
+
+          {order.customer_note && (
+            <section className="bg-orange-50 rounded-3xl border border-orange-100 p-5">
+              <h2 className="text-[11px] font-black uppercase tracking-widest text-orange-600 mb-1">Your note</h2>
+              <p className="text-sm text-orange-900">{order.customer_note}</p>
+            </section>
+          )}
+
+          {canCancel && (
+            <button onClick={cancel} disabled={!!busy} className="w-full py-3.5 rounded-full border-2 border-red-100 text-red-500 font-black uppercase tracking-widest text-xs hover:bg-red-50 disabled:opacity-50">
+              {busy === 'cancel' ? 'Cancelling…' : 'Cancel order'}
+            </button>
+          )}
+
+          <Link href="/contact" className="text-center text-xs font-bold text-slate-500 hover:text-orange-600">
+            <Clock className="w-3.5 h-3.5 inline mr-1" /> Need help with this order? Contact us
+          </Link>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+export default function OrderDetailPage() {
+  return (
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
+      <Navbar />
+      <Suspense fallback={<main className="flex-grow" />}>
+        <OrderDetail />
+      </Suspense>
       <Footer />
     </div>
   );
-};
-
-export default OrderDetailPage;
+}

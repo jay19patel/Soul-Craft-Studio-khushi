@@ -1,842 +1,224 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import Navbar from '../../../components/Navbar';
-import Footer from '../../../components/Footer';
-import { useAuth } from '../../../context/AuthContext';
-import { useRouter } from 'next/navigation';
-import {
-  getAdminStats,
-  getAdminOrders,
-  updateAdminOrder,
-  deleteAdminOrder,
-  getAdminUsers,
-  getAdminCarts,
-  getAdminEmailLogs
-} from '../../../lib/api';
-import {
-  Package,
-  ShoppingBag,
-  Banknote,
-  Clock,
-  ChevronLeft,
-  ChevronRight,
-  Loader2,
-  Search,
-  ExternalLink,
-  Image as ImageIcon,
-  Mail,
-  FileText,
-  User,
-  ShoppingCart,
-  Send,
-  AlertTriangle,
-  Trash2
-} from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
-  ResponsiveContainer,
-  ComposedChart,
-  Area,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-  Legend
+  ResponsiveContainer, ComposedChart, Area, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
-import { getPaginationRange } from '../../../lib/pagination';
+import {
+  Banknote, ShoppingBag, Clock, Package, ShoppingCart, Mail, AlertTriangle, BadgeCheck, Truck, Star, Send, RefreshCw, CheckCircle2, XCircle,
+} from 'lucide-react';
+import { getAdminStats, getAdminAlerts } from '../../../lib/api';
+import { Card, PageHeader, Button, Spinner, formatMoney, timeAgo } from '../../../components/admin/ui';
+import { StatusBadge, PaymentBadge } from '../../../components/OrderStatusBadges';
 
-const ORDERS_PAGE_SIZE = 10;
+const RANGES = [
+  { key: '7d', label: '7 days' },
+  { key: '1m', label: '30 days' },
+  { key: '1y', label: '12 months' },
+  { key: 'all', label: 'All time' },
+];
 
 export default function AdminDashboardPage() {
-  const { user, isAuthenticated, loading: authLoading } = useAuth();
-  const router = useRouter();
-
   const [stats, setStats] = useState(null);
-  const [orders, setOrders] = useState([]);
-  const [ordersTotal, setOrdersTotal] = useState(0);
-  const [ordersPage, setOrdersPage] = useState(1);
-  const [loadingOrders, setLoadingOrders] = useState(false);
-  const [statusFilter, setStatusFilter] = useState('');
-  const [paymentStatusFilter, setPaymentStatusFilter] = useState('');
-  const [users, setUsers] = useState([]);
-  const [carts, setCarts] = useState([]);
-  const [emailLogs, setEmailLogs] = useState([]);
-  const [activeTab, setActiveTab] = useState('orders'); // orders, users, carts, emaillogs
+  const [alerts, setAlerts] = useState(null);
+  const [range, setRange] = useState('7d');
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [updating, setUpdating] = useState(null);
-  const [chartRange, setChartRange] = useState('7d'); // 7d, 1m, 1y, all
-  const [isMounted, setIsMounted] = useState(false);
-  const [orderToDelete, setOrderToDelete] = useState(null);
-  const [deletingOrderId, setDeletingOrderId] = useState(null);
+  const [error, setError] = useState('');
 
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
-
-  useEffect(() => {
-    if (!authLoading && !isAuthenticated) {
-      router.push('/login');
-    } else if (!authLoading && isAuthenticated && !user?.is_superuser) {
-      router.push('/profile');
-    }
-  }, [authLoading, isAuthenticated, user, router]);
-
-  useEffect(() => {
-    if (isAuthenticated && user?.is_superuser) {
-      fetchData();
-    }
-  }, [isAuthenticated, user]);
-
-  const fetchData = async () => {
+  const load = useCallback(async (r = range) => {
     setLoading(true);
-    setError(null);
     try {
-      const [statsData, ordersData, usersData, cartsData, logsData] = await Promise.all([
-        getAdminStats(chartRange),
-        getAdminOrders({ page: 1, page_size: ORDERS_PAGE_SIZE }),
-        getAdminUsers(),
-        getAdminCarts(),
-        getAdminEmailLogs()
-      ]);
-      setStats(statsData);
-      setOrders(ordersData.results);
-      setOrdersTotal(ordersData.total);
-      setOrdersPage(1);
-      setUsers(usersData);
-      setCarts(cartsData);
-      setEmailLogs(logsData);
+      const [s, a] = await Promise.all([getAdminStats(r), getAdminAlerts()]);
+      setStats(s);
+      setAlerts(a);
+      setError('');
     } catch (err) {
-      console.error(err);
-      setError('Failed to load admin data');
+      setError(err.message);
     } finally {
       setLoading(false);
     }
-  };
+  }, [range]);
 
-  const fetchOrdersPage = async (pageNum, overrides = {}) => {
-    setLoadingOrders(true);
+  useEffect(() => {
+    load('7d');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const changeRange = async (r) => {
+    setRange(r);
     try {
-      const status = overrides.status !== undefined ? overrides.status : statusFilter;
-      const paymentStatus = overrides.paymentStatus !== undefined ? overrides.paymentStatus : paymentStatusFilter;
-      const data = await getAdminOrders({
-        page: pageNum,
-        page_size: ORDERS_PAGE_SIZE,
-        status: status || undefined,
-        payment_status: paymentStatus || undefined
-      });
-      setOrders(data.results);
-      setOrdersTotal(data.total);
-      setOrdersPage(pageNum);
+      setStats(await getAdminStats(r));
     } catch (err) {
-      console.error('Failed to load orders page:', err);
-    } finally {
-      setLoadingOrders(false);
+      setError(err.message);
     }
   };
 
-  const handleStatusFilterChange = (value) => {
-    setStatusFilter(value);
-    fetchOrdersPage(1, { status: value });
-  };
+  if (loading && !stats) return <Spinner />;
 
-  const handlePaymentStatusFilterChange = (value) => {
-    setPaymentStatusFilter(value);
-    fetchOrdersPage(1, { paymentStatus: value });
-  };
-
-  const handleDeleteOrder = async () => {
-    if (!orderToDelete || deletingOrderId) return;
-    const id = orderToDelete;
-    setDeletingOrderId(id);
-    try {
-      await deleteAdminOrder(id);
-      setOrderToDelete(null);
-      // If that was the last order on a page beyond the first, step back one page.
-      const nextPage = orders.length === 1 && ordersPage > 1 ? ordersPage - 1 : ordersPage;
-      await fetchOrdersPage(nextPage);
-    } catch (err) {
-      console.error('Failed to delete order:', err);
-      alert('Failed to delete order: ' + err.message);
-    } finally {
-      setDeletingOrderId(null);
-    }
-  };
-
-  const handleRangeChange = async (newRange) => {
-    setChartRange(newRange);
-    try {
-      const statsData = await getAdminStats(newRange);
-      setStats(statsData);
-    } catch (err) {
-      console.error('Failed to change analytics range:', err);
-    }
-  };
-
-  const handleStatusUpdate = async (orderId, field, value) => {
-    setUpdating(orderId);
-    try {
-      await updateAdminOrder(orderId, { [field]: value });
-      setOrders(orders.map(o => o.id === orderId ? { ...o, [field]: value } : o));
-      if (field === 'status' || field === 'payment_status') {
-        getAdminStats(chartRange).then(setStats);
-      }
-    } catch (err) {
-      console.error('Update failed:', err);
-      alert('Failed to update order');
-    } finally {
-      setUpdating(null);
-    }
-  };
-
-  if (authLoading || loading) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
-        <Navbar />
-        <main className="flex-grow flex items-center justify-center">
-          <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
-        </main>
-      </div>
-    );
-  }
-
-  if (!user?.is_superuser) return null;
-
-  // Filter lists based on Search term
-  const filteredOrders = orders.filter(o => 
-    String(o.id).toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (o.customer_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (o.customer_email || '').toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const filteredUsers = users.filter(u => 
-    (u.first_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (u.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (u.username || '').toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const filteredCarts = carts.filter(c => 
-    (c.user?.full_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (c.user?.email || '').toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const filteredEmailLogs = emailLogs.filter(log => 
-    (log.to_email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (log.subject || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (log.email_type || '').toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const actionItems = alerts
+    ? [
+        { count: alerts.payments_to_verify, label: 'UPI payments to verify', href: '/admin/orders?payment_status=RECEIVED', icon: BadgeCheck, tone: 'bg-blue-50 text-blue-700 border-blue-100' },
+        { count: alerts.orders_to_ship, label: 'Orders to craft & ship', href: '/admin/orders?status=CONFIRMED', icon: Truck, tone: 'bg-indigo-50 text-indigo-700 border-indigo-100' },
+        { count: alerts.needs_attention, label: 'Orders need attention', href: '/admin/orders?attention=1', icon: AlertTriangle, tone: 'bg-red-50 text-red-700 border-red-100' },
+        { count: alerts.pending_reviews, label: 'Reviews to approve', href: '/admin/reviews', icon: Star, tone: 'bg-amber-50 text-amber-700 border-amber-100' },
+        { count: alerts.unread_messages, label: 'Unread messages', href: '/admin/messages', icon: Mail, tone: 'bg-violet-50 text-violet-700 border-violet-100' },
+        { count: alerts.failed_emails, label: 'Failed emails (7 days)', href: '/admin/emails?status=FAILED', icon: Send, tone: 'bg-rose-50 text-rose-700 border-rose-100' },
+      ].filter((a) => a.count > 0)
+    : [];
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
-      <Navbar />
+    <>
+      <PageHeader
+        title="Dashboard"
+        subtitle="What needs your attention today"
+        actions={<Button variant="secondary" onClick={() => load(range)} loading={loading}><RefreshCw className="w-4 h-4" /> Refresh</Button>}
+      />
 
-      <main className="flex-grow w-full max-w-7xl mx-auto px-4 py-12 md:py-20">
-        <div className="flex flex-col gap-10">
-          
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
-            <div className="flex flex-col gap-2">
-              <Link href="/profile" className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-400 hover:text-indigo-600 w-fit transition-colors">
-                <ChevronLeft className="w-4 h-4" />
-                Back to Profile
+      {error && <div className="mb-5 rounded-xl bg-red-50 text-red-600 text-sm font-semibold p-3">{error}</div>}
+
+      {/* To-do */}
+      {alerts && (
+        actionItems.length ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+            {actionItems.map(({ count, label, href, icon: Icon, tone }) => (
+              <Link key={label} href={href} className={`flex items-center gap-3 rounded-2xl border p-4 hover:shadow-md transition-all ${tone}`}>
+                <Icon className="w-6 h-6 shrink-0" />
+                <span className="text-2xl font-black">{count}</span>
+                <span className="text-sm font-semibold leading-tight">{label}</span>
               </Link>
-              <h1 className="text-4xl md:text-5xl font-[family-name:var(--font-climate-crisis)] uppercase text-slate-900">
-                Admin <span className="text-indigo-600">Dashboard.</span>
-              </h1>
-            </div>
-            <button onClick={fetchData} className="px-6 py-3 bg-white border-2 border-indigo-100 text-indigo-600 font-bold uppercase tracking-wider text-xs rounded-xl hover:bg-indigo-50 transition-all shadow-sm">
-              Refresh Data
-            </button>
+            ))}
           </div>
-
-          {error && (
-            <div className="bg-red-50 text-red-600 p-4 rounded-xl text-sm font-bold border border-red-100 flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 shrink-0" />
-              {error}
-            </div>
-          )}
-
-          {/* Stats Grid */}
-          {stats && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 md:gap-6">
-              
-              <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex flex-col gap-4">
-                <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center">
-                  <Banknote className="w-6 h-6" />
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Total Revenue</span>
-                  <span className="text-2xl md:text-3xl font-black text-slate-900">₹{(stats.total_revenue || 0).toLocaleString('en-IN')}</span>
-                </div>
-              </div>
-
-              <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex flex-col gap-4">
-                <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center">
-                  <ShoppingBag className="w-6 h-6" />
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Total Orders</span>
-                  <span className="text-2xl md:text-3xl font-black text-slate-900">{stats.total_orders || 0}</span>
-                </div>
-              </div>
-
-              <div className="bg-white p-6 rounded-3xl border border-orange-100 bg-orange-50/30 shadow-sm flex flex-col gap-4 relative overflow-hidden">
-                <div className="w-12 h-12 bg-orange-100 text-orange-600 rounded-2xl flex items-center justify-center relative z-10">
-                  <Clock className="w-6 h-6" />
-                </div>
-                <div className="flex flex-col relative z-10">
-                  <span className="text-xs font-bold text-orange-800 uppercase tracking-widest">Pending Orders</span>
-                  <span className="text-2xl md:text-3xl font-black text-orange-600">{stats.pending_orders || 0}</span>
-                </div>
-                {stats.pending_orders > 0 && (
-                   <div className="absolute -right-4 -top-4 w-24 h-24 bg-orange-500 rounded-full blur-3xl opacity-20"></div>
-                )}
-              </div>
-
-              <Link href="/admin/products" className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex flex-col gap-4 hover:shadow-md hover:border-indigo-100 transition-all group">
-                <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
-                  <Package className="w-6 h-6" />
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">Total Products <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity text-indigo-500" /></span>
-                  <span className="text-2xl md:text-3xl font-black text-slate-900">{stats.total_products || 0}</span>
-                </div>
-              </Link>
-
-              <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex flex-col gap-4">
-                <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center">
-                  <ShoppingCart className="w-6 h-6" />
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Active Carts</span>
-                  <span className="text-2xl md:text-3xl font-black text-slate-900">{stats.active_carts || 0}</span>
-                </div>
-              </div>
-
-              <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex flex-col gap-4">
-                <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center">
-                  <Mail className="w-6 h-6" />
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Inbox Messages</span>
-                  <span className="text-2xl md:text-3xl font-black text-slate-900">{stats.total_messages || 0}</span>
-                  <div className="flex items-center gap-2 mt-2">
-                    <span className="text-[9px] font-bold text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded uppercase tracking-wider">New: {stats.unread_messages || 0}</span>
-                  </div>
-                </div>
-              </div>
-
-            </div>
-          )}
-
-          {/* Quick Links */}
-          <div className="flex flex-wrap gap-4 mt-2">
-            <Link href="/admin/products" className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm uppercase tracking-widest rounded-full shadow-lg shadow-indigo-100 transition-all flex items-center gap-2">
-              <Package className="w-4 h-4" /> Manage Products
-            </Link>
-            <Link href="/admin/messages" className="px-6 py-3 bg-slate-800 hover:bg-slate-900 text-white font-bold text-sm uppercase tracking-widest rounded-full shadow-lg shadow-slate-100 transition-all flex items-center gap-2">
-              <Mail className="w-4 h-4" /> View Inbox
-            </Link>
+        ) : (
+          <div className="mb-6 rounded-2xl border border-emerald-100 bg-emerald-50 text-emerald-800 p-4 text-sm font-semibold flex items-center gap-2">
+            <CheckCircle2 className="w-5 h-5" /> All caught up — nothing waiting for you.
           </div>
+        )
+      )}
 
-          {/* Chart Section */}
-          {stats && stats.daily_stats && isMounted && (
-            <div className="bg-white rounded-[40px] border border-slate-100 shadow-xl shadow-slate-200/20 p-6 md:p-10 flex flex-col gap-6">
-              
-              {/* Chart range filter + Title */}
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 pb-4">
-                <h2 className="text-lg font-black uppercase tracking-widest text-slate-900">
-                  Sales & Orders Analytics
-                </h2>
-                <div className="flex bg-slate-50 p-1.5 rounded-2xl border border-slate-100 text-xs font-black uppercase tracking-wider text-slate-400">
-                  <button 
-                    onClick={() => handleRangeChange('7d')}
-                    className={`px-4 py-2 rounded-xl transition-all ${chartRange === '7d' ? 'bg-white text-slate-900 shadow-sm' : 'hover:text-slate-600'}`}
-                  >
-                    7 Days
-                  </button>
-                  <button 
-                    onClick={() => handleRangeChange('1m')}
-                    className={`px-4 py-2 rounded-xl transition-all ${chartRange === '1m' ? 'bg-white text-slate-900 shadow-sm' : 'hover:text-slate-600'}`}
-                  >
-                    1 Month
-                  </button>
-                  <button 
-                    onClick={() => handleRangeChange('1y')}
-                    className={`px-4 py-2 rounded-xl transition-all ${chartRange === '1y' ? 'bg-white text-slate-900 shadow-sm' : 'hover:text-slate-600'}`}
-                  >
-                    1 Year
-                  </button>
-                  <button 
-                    onClick={() => handleRangeChange('all')}
-                    className={`px-4 py-2 rounded-xl transition-all ${chartRange === 'all' ? 'bg-white text-slate-900 shadow-sm' : 'hover:text-slate-600'}`}
-                  >
-                    All Time
-                  </button>
-                </div>
-              </div>
-
-              <div className="w-full h-80">
-                <ResponsiveContainer width="99%" height="100%">
-                  <ComposedChart data={stats.daily_stats} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.15}/>
-                        <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="label" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
-                    <YAxis yAxisId="left" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => `₹${v}`} />
-                    <YAxis yAxisId="right" orientation="right" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => String(v)} />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: '#ffffff', borderRadius: '16px', border: '1px solid #f1f5f9', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.05)' }}
-                      labelStyle={{ fontWeight: 'black', color: '#1e293b', marginBottom: '4px' }}
-                    />
-                    <Legend verticalAlign="top" height={36} iconType="circle" />
-                    <Area yAxisId="left" type="monotone" dataKey="sales" name="Revenue (₹)" stroke="#4f46e5" strokeWidth={3} fillOpacity={1} fill="url(#colorSales)" />
-                    <Bar yAxisId="right" dataKey="orders" name="Orders Count" fill="#10b981" barSize={16} radius={[4, 4, 0, 0]} />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          )}
-
-          {/* Extended Tabs Section */}
-          <div className="bg-white rounded-[40px] border border-slate-100 shadow-xl shadow-slate-200/20 p-6 md:p-10 flex flex-col gap-8">
-            
-            {/* Header + Search + Tabs */}
-            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 border-b border-slate-100 pb-6">
-              
-              <div className="flex flex-wrap gap-4 text-xs font-black uppercase tracking-wider">
-                <button 
-                  onClick={() => { setActiveTab('orders'); setSearchTerm(''); }} 
-                  className={`px-5 py-3 rounded-full transition-all flex items-center gap-2 ${activeTab === 'orders' ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}
-                >
-                  <ShoppingBag className="w-3.5 h-3.5" /> Orders ({ordersTotal})
-                </button>
-                <button 
-                  onClick={() => { setActiveTab('users'); setSearchTerm(''); }} 
-                  className={`px-5 py-3 rounded-full transition-all flex items-center gap-2 ${activeTab === 'users' ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}
-                >
-                  <User className="w-3.5 h-3.5" /> Users ({users.length})
-                </button>
-                <button 
-                  onClick={() => { setActiveTab('carts'); setSearchTerm(''); }} 
-                  className={`px-5 py-3 rounded-full transition-all flex items-center gap-2 ${activeTab === 'carts' ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}
-                >
-                  <ShoppingCart className="w-3.5 h-3.5" /> Carts ({carts.length})
-                </button>
-                <button 
-                  onClick={() => { setActiveTab('emaillogs'); setSearchTerm(''); }} 
-                  className={`px-5 py-3 rounded-full transition-all flex items-center gap-2 ${activeTab === 'emaillogs' ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}
-                >
-                  <Send className="w-3.5 h-3.5" /> Email Logs ({emailLogs.length})
-                </button>
-              </div>
-
-              <div className="flex flex-col sm:flex-row items-stretch gap-3 w-full lg:w-auto">
-                {activeTab === 'orders' && (
-                  <>
-                    <select
-                      value={paymentStatusFilter}
-                      onChange={(e) => handlePaymentStatusFilterChange(e.target.value)}
-                      className="bg-slate-50 border-none rounded-2xl py-3 px-4 text-xs font-bold text-slate-600 focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
-                    >
-                      <option value="">All Payment Status</option>
-                      <option value="PENDING">Pending</option>
-                      <option value="RECEIVED">Received</option>
-                      <option value="VERIFIED">Verified</option>
-                      <option value="FAILED">Failed</option>
-                    </select>
-                    <select
-                      value={statusFilter}
-                      onChange={(e) => handleStatusFilterChange(e.target.value)}
-                      className="bg-slate-50 border-none rounded-2xl py-3 px-4 text-xs font-bold text-slate-600 focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
-                    >
-                      <option value="">All Order Status</option>
-                      <option value="PENDING">Pending</option>
-                      <option value="PROCESSING">Processing</option>
-                      <option value="SHIPPED">Shipped</option>
-                      <option value="DELIVERED">Delivered</option>
-                      <option value="CANCELLED">Cancelled</option>
-                    </select>
-                  </>
-                )}
-                <div className="relative w-full lg:w-80">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder={
-                      activeTab === 'orders' ? "Search by Order ID, name..." :
-                      activeTab === 'users' ? "Search by email, name..." :
-                      activeTab === 'carts' ? "Search by email, name..." :
-                      "Search email logs..."
-                    }
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full bg-slate-50 border-none rounded-2xl py-3 pl-10 pr-4 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
-                </div>
-              </div>
-
-            </div>
-
-            {/* TAB CONTENT: ORDERS */}
-            {activeTab === 'orders' && (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse min-w-[900px]">
-                  <thead>
-                    <tr className="border-b-2 border-slate-50">
-                      <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400 pl-4">Order Details</th>
-                      <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Customer</th>
-                      <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Payment Info</th>
-                      <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Payment Status</th>
-                      <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Order Status</th>
-                      <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Invoice</th>
-                      <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400 text-right pr-4">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {filteredOrders.length === 0 ? (
-                      <tr>
-                        <td colSpan="7" className="py-8 text-center text-slate-500 text-sm">No orders found.</td>
-                      </tr>
-                    ) : filteredOrders.map((order) => (
-                      <tr key={order.id} className="hover:bg-slate-50/50 transition-colors group">
-                        <td className="py-6 pl-4 pr-4 align-top">
-                          <div className="flex flex-col gap-1">
-                            <Link href={`/orders/${order.id}`} className="font-black text-sm text-indigo-600 hover:text-indigo-800 transition-colors flex items-center gap-1 group-hover:underline w-fit">
-                              #{order.id} <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                            </Link>
-                            <span className="text-xs text-slate-500">{new Date(order.created_at).toLocaleDateString()}</span>
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1 font-mono">
-                              {order.items?.length || 0} {(order.items?.length === 1) ? 'item' : 'items'}
-                            </span>
-                            <span className="text-sm font-bold text-indigo-600 mt-1">₹{Number(order.total_amount).toLocaleString('en-IN')}</span>
-                          </div>
-                        </td>
-                        <td className="py-6 pr-4 align-top">
-                          <div className="flex flex-col gap-1">
-                            <span className="font-bold text-sm text-slate-800">{order.customer_name || 'N/A'}</span>
-                            <span className="text-xs text-slate-500">{order.customer_email || 'N/A'}</span>
-                            <span className="text-xs text-slate-500">{order.customer_phone || 'N/A'}</span>
-                          </div>
-                        </td>
-                        <td className="py-6 pr-4 align-top">
-                          <div className="flex flex-col gap-2">
-                            {order.payment_reference && (
-                              <div className="flex items-center gap-2 text-xs">
-                                <span className="font-black text-slate-400 uppercase tracking-widest text-[9px]">Ref:</span>
-                                <span className="font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded">{order.payment_reference}</span>
-                              </div>
-                            )}
-                            <span className="text-xs text-slate-500 font-mono">{order.upi_transaction_id || 'No UPI Transaction ID'}</span>
-                            {order.screenshot_url ? (
-                              <a href={order.screenshot_url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-xs text-indigo-600 hover:text-indigo-800 font-bold bg-indigo-50 px-3 py-1.5 rounded-lg w-fit transition-colors">
-                                <ImageIcon className="w-3.5 h-3.5" /> View Screenshot
-                              </a>
-                            ) : (
-                              <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">No Screenshot</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-6 pr-4 align-top">
-                          <select
-                            value={order.payment_status}
-                            onChange={(e) => handleStatusUpdate(order.id, 'payment_status', e.target.value)}
-                            disabled={updating === order.id}
-                            className={`text-xs font-bold uppercase tracking-wider rounded-xl px-3 py-2 border-2 outline-none appearance-none cursor-pointer transition-colors ${
-                              order.payment_status === 'VERIFIED' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
-                              order.payment_status === 'PENDING' ? 'bg-orange-50 text-orange-700 border-orange-100' :
-                              order.payment_status === 'FAILED' ? 'bg-red-50 text-red-700 border-red-100' :
-                              'bg-blue-50 text-blue-700 border-blue-100'
-                            }`}
-                          >
-                            <option value="PENDING">Pending</option>
-                            <option value="RECEIVED">Received</option>
-                            <option value="VERIFIED">Verified</option>
-                            <option value="FAILED">Failed</option>
-                          </select>
-                        </td>
-                        <td className="py-6 pr-4 align-top">
-                          <select
-                            value={order.status}
-                            onChange={(e) => handleStatusUpdate(order.id, 'status', e.target.value)}
-                            disabled={updating === order.id}
-                            className={`text-xs font-bold uppercase tracking-wider rounded-xl px-3 py-2 border-2 outline-none appearance-none cursor-pointer transition-colors ${
-                              order.status === 'DELIVERED' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
-                              order.status === 'PENDING' ? 'bg-slate-100 text-slate-700 border-slate-200' :
-                              order.status === 'CANCELLED' ? 'bg-red-50 text-red-700 border-red-100' :
-                              'bg-indigo-50 text-indigo-700 border-indigo-100'
-                            }`}
-                          >
-                            <option value="PENDING">Pending</option>
-                            <option value="PROCESSING">Processing</option>
-                            <option value="SHIPPED">Shipped</option>
-                            <option value="DELIVERED">Delivered</option>
-                            <option value="CANCELLED">Cancelled</option>
-                          </select>
-                        </td>
-                        <td className="py-6 pr-4 align-top">
-                          <Link href={`/orders/${order.id}/invoice`} target="_blank" className="inline-flex items-center gap-2 bg-slate-900 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-colors">
-                            <FileText className="w-3.5 h-3.5" /> Invoice
-                          </Link>
-                        </td>
-                        <td className="py-6 pr-4 align-top text-right">
-                          <button
-                            onClick={() => setOrderToDelete(order.id)}
-                            disabled={deletingOrderId === order.id}
-                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                            title="Delete order"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {!searchTerm && ordersTotal > ORDERS_PAGE_SIZE && (
-                  <div className="flex justify-center items-center gap-2 pt-8 flex-wrap">
-                    <button
-                      onClick={() => fetchOrdersPage(ordersPage - 1)}
-                      disabled={ordersPage <= 1 || loadingOrders}
-                      className="px-4 py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-full text-xs font-black uppercase tracking-widest transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
-                    >
-                      <ChevronLeft className="w-4 h-4" /> Prev
-                    </button>
-
-                    {getPaginationRange(ordersPage, Math.ceil(ordersTotal / ORDERS_PAGE_SIZE)).map((p) =>
-                      typeof p === 'number' ? (
-                        <button
-                          key={p}
-                          onClick={() => fetchOrdersPage(p)}
-                          disabled={loadingOrders}
-                          className={`w-9 h-9 rounded-full text-xs font-black transition-all disabled:cursor-not-allowed ${
-                            p === ordersPage
-                              ? 'bg-indigo-600 text-white shadow-lg'
-                              : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
-                          }`}
-                        >
-                          {p}
-                        </button>
-                      ) : (
-                        <span key={p} className="px-1 text-slate-300 text-xs font-black">…</span>
-                      )
-                    )}
-
-                    <button
-                      onClick={() => fetchOrdersPage(ordersPage + 1)}
-                      disabled={ordersPage >= Math.ceil(ordersTotal / ORDERS_PAGE_SIZE) || loadingOrders}
-                      className="px-4 py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-full text-xs font-black uppercase tracking-widest transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
-                    >
-                      Next <ChevronRight className="w-4 h-4" />
-                    </button>
-
-                    {loadingOrders && <Loader2 className="w-4 h-4 animate-spin text-indigo-600 ml-2" />}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* TAB CONTENT: USERS */}
-            {activeTab === 'users' && (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse min-w-[700px]">
-                  <thead>
-                    <tr className="border-b-2 border-slate-50">
-                      <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400 pl-4">Joined Date</th>
-                      <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">User Details</th>
-                      <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Login ID / Username</th>
-                      <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Role</th>
-                      <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50 text-sm">
-                    {filteredUsers.length === 0 ? (
-                      <tr>
-                        <td colSpan="5" className="py-8 text-center text-slate-500">No users found.</td>
-                      </tr>
-                    ) : filteredUsers.map((u) => (
-                      <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="py-4 pl-4 text-slate-500 font-mono text-xs">
-                          {u.date_joined ? new Date(u.date_joined).toLocaleDateString() : 'N/A'}
-                        </td>
-                        <td className="py-4">
-                          <div className="flex flex-col">
-                            <span className="font-bold text-slate-800">{u.first_name || 'Guest User'}</span>
-                            <span className="text-xs text-slate-400">{u.email}</span>
-                          </div>
-                        </td>
-                        <td className="py-4 font-mono text-xs text-slate-700">{u.username}</td>
-                        <td className="py-4">
-                          {u.is_superuser ? (
-                            <span className="bg-indigo-50 text-indigo-600 text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider">Super Admin</span>
-                          ) : (
-                            <span className="bg-slate-100 text-slate-500 text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider">Customer</span>
-                          )}
-                        </td>
-                        <td className="py-4">
-                          {u.is_active ? (
-                            <span className="text-green-600 font-bold text-xs">Active</span>
-                          ) : (
-                            <span className="text-red-500 font-bold text-xs">Inactive</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {/* TAB CONTENT: CARTS (Abandoned/Active Carts - Read Only) */}
-            {activeTab === 'carts' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {filteredCarts.length === 0 ? (
-                  <div className="col-span-2 py-8 text-center text-slate-500">No active carts found.</div>
-                ) : filteredCarts.map((c) => (
-                  <div key={c.id} className="bg-slate-50/50 border border-slate-100 p-6 rounded-3xl flex flex-col gap-4">
-                    <div className="flex justify-between items-start border-b border-slate-100 pb-3">
-                      <div className="flex flex-col">
-                        <span className="font-bold text-slate-800 text-sm">{c.user?.full_name}</span>
-                        <span className="text-xs text-slate-400">{c.user?.email}</span>
-                      </div>
-                      <span className="text-[10px] text-slate-400 font-mono">Updated: {new Date(c.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    </div>
-
-                    <div className="flex flex-col gap-2.5">
-                      {c.items.map((item, idx) => (
-                        <div key={idx} className="flex justify-between items-center text-xs">
-                          <div className="flex flex-col">
-                            <span className="font-bold text-slate-800 uppercase tracking-wide">{item.product_name}</span>
-                            {item.variant_info && (
-                              <span className="text-[10px] text-slate-400">Variant: {item.variant_info}</span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-4 text-slate-600">
-                            <span>Qty: {item.quantity}</span>
-                            <span className="font-bold">₹{item.price * item.quantity}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="border-t border-slate-100 pt-3 flex justify-between items-center text-xs font-black uppercase text-indigo-600">
-                      <span>Total Value</span>
-                      <span>₹{c.items.reduce((sum, item) => sum + (item.price * item.quantity), 0).toLocaleString('en-IN')}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* TAB CONTENT: EMAIL LOGS */}
-            {activeTab === 'emaillogs' && (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse min-w-[900px]">
-                  <thead>
-                    <tr className="border-b-2 border-slate-50">
-                      <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400 pl-4">Timestamp</th>
-                      <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Recipient</th>
-                      <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Type / Subject</th>
-                      <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">SMTP backend</th>
-                      <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Status</th>
-                      <th className="pb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Logs / Error</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50 text-xs">
-                    {filteredEmailLogs.length === 0 ? (
-                      <tr>
-                        <td colSpan="6" className="py-8 text-center text-slate-500">No email logs found.</td>
-                      </tr>
-                    ) : filteredEmailLogs.map((log) => (
-                      <tr key={log.id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="py-4 pl-4 text-slate-500 font-mono leading-relaxed">
-                          {new Date(log.queued_at).toLocaleDateString()}<br />
-                          {new Date(log.queued_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                        </td>
-                        <td className="py-4">
-                          <span className="font-bold text-slate-700">{log.to_email}</span>
-                        </td>
-                        <td className="py-4 pr-4">
-                          <div className="flex flex-col gap-1">
-                            <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-black text-[9px] uppercase w-fit tracking-wider">{log.email_type}</span>
-                            <span className="font-medium text-slate-800 leading-normal">{log.subject}</span>
-                          </div>
-                        </td>
-                        <td className="py-4 font-mono uppercase text-[10px] text-slate-500">
-                          {log.backend}
-                        </td>
-                        <td className="py-4">
-                          <span className={`px-2.5 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider ${
-                            log.status === 'SENT' ? 'bg-emerald-50 text-emerald-600' :
-                            log.status === 'FAILED' ? 'bg-red-50 text-red-600 border border-red-100 animate-pulse' :
-                            'bg-orange-50 text-orange-600'
-                          }`}>
-                            {log.status}
-                          </span>
-                        </td>
-                        <td className="py-4 pr-4 align-middle">
-                          {log.error_message ? (
-                            <span className="text-red-500 font-mono block max-w-[200px] truncate" title={log.error_message}>
-                              ⚠️ {log.error_message}
-                            </span>
-                          ) : (
-                            <span className="text-slate-400 font-bold">Success</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-          </div>
-
-        </div>
-      </main>
-
-      {/* Delete Order Confirmation Dialog */}
-      {orderToDelete && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-[32px] w-full max-w-sm shadow-2xl p-8 flex flex-col gap-6">
-            <div className="flex flex-col gap-2">
-              <div className="w-12 h-12 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center">
-                <Trash2 className="w-6 h-6" />
-              </div>
-              <h3 className="text-xl font-black text-blue-950">Delete this order?</h3>
-              <p className="text-sm text-slate-500">
-                Order <span className="font-mono font-bold text-slate-700">#{orderToDelete}</span> and its payment records will be permanently deleted. This cannot be undone.
-              </p>
-            </div>
-            <div className="flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setOrderToDelete(null)}
-                disabled={deletingOrderId === orderToDelete}
-                className="px-5 py-3 rounded-xl text-xs font-black uppercase tracking-widest text-slate-500 hover:bg-slate-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleDeleteOrder}
-                disabled={deletingOrderId === orderToDelete}
-                className="px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {deletingOrderId === orderToDelete ? 'Deleting...' : 'Delete Order'}
-              </button>
-            </div>
-          </div>
+      {/* Stats */}
+      {stats && (
+        <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-6">
+          <Stat icon={Banknote} label="Paid revenue" value={formatMoney(stats.total_revenue)} className="col-span-2" accent="text-emerald-600 bg-emerald-50" />
+          <Stat icon={ShoppingBag} label="Total orders" value={stats.total_orders} accent="text-blue-600 bg-blue-50" />
+          <Stat icon={Clock} label="Open orders" value={stats.pending_orders} accent="text-orange-600 bg-orange-50" />
+          <Stat icon={Package} label="Products" value={stats.total_products} accent="text-indigo-600 bg-indigo-50" href="/admin/products" />
+          <Stat icon={ShoppingCart} label="Active carts" value={stats.active_carts} accent="text-amber-600 bg-amber-50" href="/admin/customers?tab=carts" />
         </div>
       )}
 
-      <Footer />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <Card className="lg:col-span-2" title="Sales" actions={
+          <div className="flex bg-slate-100 rounded-xl p-1 text-[11px] font-bold">
+            {RANGES.map((r) => (
+              <button key={r.key} onClick={() => changeRange(r.key)} className={`px-2.5 py-1.5 rounded-lg ${range === r.key ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>
+                {r.label}
+              </button>
+            ))}
+          </div>
+        }>
+          <div className="h-64 md:h-72 -ml-4 md:ml-0">
+            {stats?.daily_stats && (
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={stats.daily_stats} margin={{ top: 10, right: 8, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="salesFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.2} />
+                      <stop offset="95%" stopColor="#4f46e5" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="label" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} minTickGap={12} />
+                  <YAxis yAxisId="left" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} width={48} tickFormatter={(v) => (v >= 1000 ? `₹${Math.round(v / 1000)}k` : `₹${v}`)} />
+                  <YAxis yAxisId="right" orientation="right" hide />
+                  <Tooltip
+                    formatter={(value, name) => (name === 'Paid revenue' ? formatMoney(value) : value)}
+                    contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }}
+                  />
+                  <Bar yAxisId="right" dataKey="orders" name="Orders" fill="#fdba74" radius={[4, 4, 0, 0]} barSize={14} />
+                  <Area yAxisId="left" type="monotone" dataKey="sales" name="Paid revenue" stroke="#4f46e5" strokeWidth={2.5} fill="url(#salesFill)" />
+                </ComposedChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+          <p className="text-[11px] text-slate-400 mt-2">Line = revenue from paid orders · Bars = number of orders (excluding cancelled)</p>
+        </Card>
+
+        <Card title="Store setup">
+          {alerts && (
+            <ul className="flex flex-col gap-3 text-sm">
+              <SetupRow ok={alerts.integrations.upi_id} label="UPI payments (QR)" hint="Add your UPI ID in Settings → Payments" />
+              <SetupRow ok={alerts.integrations.cod} label="Cash on delivery" hint="Optional — Settings → Payments" />
+              <SetupRow ok={alerts.integrations.smtp} label="Email sending (SMTP)" hint="Add SMTP_* env variables" />
+            </ul>
+          )}
+          <Link href="/admin/settings" className="mt-4 inline-block text-xs font-bold text-indigo-600">Open settings →</Link>
+        </Card>
+
+        <Card className="lg:col-span-2" title="Recent orders" actions={<Link href="/admin/orders" className="text-xs font-bold text-indigo-600">View all</Link>} padded={false}>
+          <ul className="divide-y divide-slate-100">
+            {(alerts?.recent_orders || []).map((o) => (
+              <li key={o.id}>
+                <Link href={`/admin/orders/${o.id}`} className="flex items-center gap-3 px-4 md:px-6 py-3 hover:bg-slate-50">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-slate-900 truncate">{o.order_number} · {o.customer_name}</p>
+                    <p className="text-xs text-slate-500">{timeAgo(o.created_at)} · {formatMoney(o.total_amount)}</p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <StatusBadge status={o.status} />
+                    <PaymentBadge status={o.payment_status} method={o.payment_method} />
+                  </div>
+                </Link>
+              </li>
+            ))}
+            {alerts && !alerts.recent_orders.length && <li className="px-6 py-8 text-sm text-slate-500 text-center">No orders yet.</li>}
+          </ul>
+        </Card>
+
+        <Card title={`Low stock (≤ ${alerts?.low_stock_threshold ?? 3})`} padded={false}>
+          <ul className="divide-y divide-slate-100">
+            {(alerts?.low_stock || []).map((p) => (
+              <li key={p.id}>
+                <Link href={`/admin/products/${p.id}`} className="flex items-center gap-3 px-4 md:px-6 py-3 hover:bg-slate-50">
+                  <div className="w-10 h-10 rounded-lg bg-slate-100 overflow-hidden shrink-0">
+                    {p.image && <img src={p.image} alt="" className="w-full h-full object-cover" />}
+                  </div>
+                  <span className="flex-1 text-sm font-semibold text-slate-800 truncate">{p.name}</span>
+                  <span className={`text-xs font-black ${p.stock === 0 ? 'text-red-600' : 'text-amber-600'}`}>{p.stock === 0 ? 'Sold out' : `${p.stock} left`}</span>
+                </Link>
+              </li>
+            ))}
+            {alerts && !alerts.low_stock.length && <li className="px-6 py-8 text-sm text-slate-500 text-center">Stock levels look healthy.</li>}
+          </ul>
+        </Card>
+      </div>
+    </>
+  );
+}
+
+function Stat({ icon: Icon, label, value, accent, className = '', href }) {
+  const body = (
+    <div className={`bg-white rounded-2xl border border-slate-200/70 p-4 flex flex-col gap-3 h-full ${href ? 'hover:shadow-md transition-all' : ''}`}>
+      <span className={`w-9 h-9 rounded-xl flex items-center justify-center ${accent}`}>
+        <Icon className="w-5 h-5" />
+      </span>
+      <span className="flex flex-col">
+        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">{label}</span>
+        <span className="text-xl md:text-2xl font-black text-slate-900">{value}</span>
+      </span>
     </div>
+  );
+  return href ? <Link href={href} className={className}>{body}</Link> : <div className={className}>{body}</div>;
+}
+
+function SetupRow({ ok, label, hint }) {
+  return (
+    <li className="flex items-start gap-2.5">
+      {ok ? <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" /> : <XCircle className="w-5 h-5 text-slate-300 shrink-0" />}
+      <span className="flex flex-col">
+        <span className="font-semibold text-slate-800">{label}</span>
+        {!ok && <span className="text-xs text-slate-500">{hint}</span>}
+      </span>
+    </li>
   );
 }

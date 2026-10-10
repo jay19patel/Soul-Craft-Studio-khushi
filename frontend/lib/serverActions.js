@@ -1,17 +1,41 @@
 "use server";
 
-import { cookies } from 'next/headers';
-import { unstable_cache, revalidateTag } from 'next/cache';
-import fs from 'fs';
-import path from 'path';
-import crypto from 'crypto';
-import { ObjectId } from 'mongodb';
-import { getDb } from './db';
-import { verifyPassword, hashPassword, signToken, verifyToken } from './auth';
-import { uploadFile } from './upload';
-import { sendWelcomeEmail, sendOrderConfirmationEmail, sendOrderStatusEmail, sendPaymentStatusEmail } from './email';
+/**
+ * Every function exported from this file is a Server Action — i.e. callable
+ * from the browser. So every one of them must check who is calling and
+ * validate its input. Each returns `{ ok: true, data }` or `{ ok: false, error }`
+ * (see run() in lib/server/core.js); lib/api.js unwraps that for the UI.
+ */
 
-// ── Common Helpers ──
+import { cookies } from 'next/headers';
+import { after } from 'next/server';
+import crypto from 'crypto';
+import { getDb } from './db';
+import { verifyPassword, hashPassword, signToken } from './auth';
+import { uploadImageFile, UploadError } from './upload';
+import {
+  run, fail, nowIso, getQueryById, escapeRegExp, slugify, invalidate, logActivity,
+  cleanText, cleanMultiline, cleanEmail, cleanPhone, cleanPincode, cleanNumber,
+  getAuthenticatedUser, requireUser, requireAdmin,
+} from './server/core';
+import {
+  getSettings, getPublicSettings as loadPublicSettings, saveSettingsSection, DEFAULT_SETTINGS,
+} from './server/settings';
+import {
+  listCategoriesCached, queryProducts, getActiveProduct, getAnyProduct, serializeProduct,
+  serializeTestimonial, listPublicTestimonialsCached, getCategoryMap, effectivePrice, primaryImageOf, totalStockOf,
+} from './server/catalog';
+import {
+  placeOrder, loadOrder, findOrderDoc, serializeOrders,
+  changeOrderStatus, changePaymentStatus, ORDER_STATUSES, PAYMENT_STATUSES,
+} from './server/orders';
+import {
+  sendWelcomeEmail, sendAdminContactMessageEmail, resendLoggedEmail, buildInvoiceAttachment,
+  deliverEmail, isSmtpConfigured, EMAIL_TYPES, SITE_URL,
+} from './email';
+import { normalizeVideoList, getYouTubeId, isYouTubeShortUrl } from './youtube';
+
+// ── Session cookie ──
 
 async function setAuthCookie(token) {
   const cookieStore = await cookies();
@@ -20,1679 +44,1385 @@ async function setAuthCookie(token) {
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     path: '/',
-    maxAge: 60 * 60 * 24 * 7, // 7 days
+    maxAge: 60 * 60 * 24 * 7,
   });
 }
 
-async function deleteAuthCookie() {
-  const cookieStore = await cookies();
-  cookieStore.delete('auth_token');
-}
-
-function getFormattedDate(date = new Date()) {
-  return date.toISOString();
-}
-
-function stripHtml(html) {
-  return html.replace(/<[^>]*>/g, '').trim();
-}
-
-function escapeRegExp(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * Returns a query object for MongoDB matching _id as string or ObjectId.
- */
-function getQueryById(id) {
-  if (!id) return { _id: null };
-  const idStr = String(id);
+function backgroundTask(fn) {
+  const task = () => fn().catch((err) => console.error('[background]', err));
   try {
-    return { $or: [{ _id: idStr }, { _id: new ObjectId(idStr) }] };
-  } catch (e) {
-    return { _id: idStr };
+    after(task);
+  } catch {
+    task();
   }
 }
 
-/**
- * Helper to resolve authenticated user from cookies in MongoDB context.
- */
-export async function getAuthenticatedUser() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('auth_token')?.value;
-  
-  if (!token) return null;
-  
-  const payload = verifyToken(token);
-  if (!payload || !payload.id) return null;
-  
-  const db = await getDb();
-  const user = await db.collection('users').findOne(getQueryById(payload.id));
-  
-  if (!user || !user.is_active) return null;
-  
-  return {
-    id: user._id.toString(),
-    email: user.email,
-    username: user.username,
-    full_name: user.first_name,
-    is_superuser: !!user.is_superuser
-  };
+const publicUser = (u) => ({
+  id: u._id.toString(),
+  email: u.email,
+  full_name: u.first_name || '',
+  is_superuser: !!u.is_superuser,
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// STOREFRONT (public)
+// ══════════════════════════════════════════════════════════════════════
+
+export async function getPublicSettings() {
+  return run(() => loadPublicSettings());
 }
-
-// ── CATALOG FUNCTIONS ──
-
-const getCategoriesCached = unstable_cache(
-  async () => {
-    const db = await getDb();
-    const categories = await db.collection('categories').find().toArray();
-
-    const categoryMap = {};
-    categories.forEach(c => {
-      const idStr = c._id.toString();
-      categoryMap[idStr] = {
-        id: idStr,
-        name: c.name,
-        slug: c.slug,
-        description: c.description,
-        parent: c.parent_id ? String(c.parent_id) : null,
-        image_url: c.image_url,
-        created_at: c.created_at,
-        updated_at: c.updated_at,
-        children: []
-      };
-    });
-
-    const rootCategories = [];
-    Object.values(categoryMap).forEach(c => {
-      if (c.parent === null || c.parent === undefined || c.parent === '') {
-        rootCategories.push(c);
-      } else if (categoryMap[c.parent]) {
-        categoryMap[c.parent].children.push(c);
-      }
-    });
-
-    return { results: rootCategories };
-  },
-  ['categories-list'],
-  { tags: ['categories'], revalidate: 60 }
-);
 
 export async function getCategories() {
-  return getCategoriesCached();
+  return run(async () => ({ results: await listCategoriesCached() }));
 }
-
-export async function createAdminCategory(categoryData) {
-  const user = await getAuthenticatedUser();
-  if (!user || !user.is_superuser) throw new Error('Unauthorized');
-  
-  const db = await getDb();
-  const now = getFormattedDate();
-  
-  let c = categoryData;
-  let uploadedImage = null;
-  
-  if (categoryData instanceof FormData) {
-    c = {
-      name: categoryData.get('name'),
-      slug: categoryData.get('slug'),
-      description: categoryData.get('description') || ''
-    };
-    
-    // Handle image file upload if present
-    const imageFile = categoryData.get('image');
-    if (imageFile && typeof imageFile === 'object' && imageFile.name) {
-      try {
-        const bytes = await imageFile.arrayBuffer();
-        const buffer = Buffer.from(bytes);
-        const ext = path.extname(imageFile.name) || '.jpeg';
-        const filename = `categories/${crypto.randomUUID()}${ext}`;
-        const imageUrl = await uploadFile(buffer, filename, imageFile.type || 'image/jpeg');
-        uploadedImage = imageUrl;
-      } catch (err) {
-        console.error('Failed to upload category image:', err);
-      }
-    }
-  }
-  
-  const lastCat = await db.collection('categories').find().sort({ _id: -1 }).limit(1).toArray();
-  let nextId = "1";
-  if (lastCat.length > 0) {
-    const lastIdVal = parseInt(lastCat[0]._id);
-    if (!isNaN(lastIdVal)) {
-      nextId = String(lastIdVal + 1);
-    } else {
-      nextId = crypto.randomUUID();
-    }
-  }
-
-  const newCategory = {
-    _id: nextId,
-    name: c.name,
-    slug: c.slug || c.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, ''),
-    description: c.description || '',
-    image_url: uploadedImage || null,
-    created_at: now,
-    updated_at: now
-  };
-  
-  await db.collection('categories').insertOne(newCategory);
-  revalidateTag('categories');
-  return { id: nextId, ...newCategory };
-}
-
-export async function updateAdminCategory(id, categoryData) {
-  const user = await getAuthenticatedUser();
-  if (!user || !user.is_superuser) throw new Error('Unauthorized');
-  
-  const db = await getDb();
-  const now = getFormattedDate();
-  
-  let c = categoryData;
-  let uploadedImage = null;
-  
-  if (categoryData instanceof FormData) {
-    c = {
-      name: categoryData.get('name') || undefined,
-      slug: categoryData.get('slug') || undefined,
-      description: categoryData.get('description') || undefined
-    };
-    
-    // Handle image file upload if present
-    const imageFile = categoryData.get('image');
-    if (imageFile && typeof imageFile === 'object' && imageFile.name) {
-      try {
-        const bytes = await imageFile.arrayBuffer();
-        const buffer = Buffer.from(bytes);
-        const ext = path.extname(imageFile.name) || '.jpeg';
-        const filename = `categories/${crypto.randomUUID()}${ext}`;
-        const imageUrl = await uploadFile(buffer, filename, imageFile.type || 'image/jpeg');
-        uploadedImage = imageUrl;
-      } catch (err) {
-        console.error('Failed to upload category image:', err);
-      }
-    }
-  }
-  
-  const updates = {};
-  if (c.name !== undefined) updates.name = c.name;
-  if (c.slug !== undefined) updates.slug = c.slug;
-  if (c.description !== undefined) updates.description = c.description;
-  if (uploadedImage !== null) updates.image_url = uploadedImage;
-  updates.updated_at = now;
-  
-  await db.collection('categories').updateOne(getQueryById(id), { $set: updates });
-  revalidateTag('categories');
-  revalidateTag('products'); // category name/image may be embedded in cached product listings
-
-  const updated = await db.collection('categories').findOne(getQueryById(id));
-  return { id: updated._id.toString(), ...updated };
-}
-
-export async function deleteAdminCategory(id) {
-  const user = await getAuthenticatedUser();
-  if (!user || !user.is_superuser) throw new Error('Unauthorized');
-  
-  const db = await getDb();
-  
-  // Update any products referencing this category to prevent orphans (default to category_id "1")
-  await db.collection('products').updateMany(
-    { category_id: String(id) },
-    { $set: { category_id: "1" } }
-  );
-  
-  await db.collection('categories').deleteOne(getQueryById(id));
-  revalidateTag('categories');
-  revalidateTag('products');
-  return { success: true };
-}
-
-export async function getTestimonials() {
-  const db = await getDb();
-  const testimonials = await db.collection('testimonials').find({ is_active: true }).sort({ created_at: -1 }).toArray();
-  return {
-    results: testimonials.map(({ _id, ...t }) => ({
-      ...t,
-      id: _id.toString()
-    }))
-  };
-}
-
-export async function getMyTestimonial() {
-  const user = await getAuthenticatedUser();
-  if (!user) throw new Error('Unauthenticated');
-
-  const db = await getDb();
-  const testimonial = await db.collection('testimonials').findOne({ user_id: user.id });
-  if (!testimonial) return null;
-
-  const { _id, ...t } = testimonial;
-  return { ...t, id: _id.toString() };
-}
-
-export async function submitTestimonial(payload) {
-  const user = await getAuthenticatedUser();
-  if (!user) throw new Error('Unauthenticated');
-
-  const content = (payload.content || '').trim();
-  if (!content) throw new Error('Feedback message is required.');
-  const rating = Math.min(5, Math.max(1, Number(payload.rating) || 5));
-
-  const db = await getDb();
-  const now = getFormattedDate();
-  const existing = await db.collection('testimonials').findOne({ user_id: user.id });
-
-  if (existing) {
-    await db.collection('testimonials').updateOne(
-      { _id: existing._id },
-      { $set: { content, rating, updated_at: now, is_active: true } }
-    );
-    return { id: existing._id.toString(), content, rating };
-  }
-
-  const result = await db.collection('testimonials').insertOne({
-    user_id: user.id,
-    author_name: user.full_name || user.email,
-    content,
-    rating,
-    is_active: true,
-    created_at: now,
-    updated_at: now
-  });
-
-  return { id: result.insertedId.toString(), content, rating };
-}
-
-const getProductsCached = unstable_cache(
-  async (params = {}) => {
-  const db = await getDb();
-  const query = { is_active: true };
-  
-  // Support both params.category and params.category_id
-  const targetCategory = params.category_id || params.category;
-  if (targetCategory && targetCategory !== 'all') {
-    // Find category by ID or slug
-    const cat = await db.collection('categories').findOne({
-      $or: [{ _id: String(targetCategory) }, { slug: String(targetCategory) }]
-    });
-    if (cat) {
-      query.category_id = cat._id.toString();
-    } else {
-      query.category_id = String(targetCategory);
-    }
-  }
-  
-  if (params.search) {
-    const safeSearch = escapeRegExp(String(params.search));
-    query.$or = [
-      { name: { $regex: safeSearch, $options: 'i' } },
-      { description: { $regex: safeSearch, $options: 'i' } }
-    ];
-  }
-  
-  const products = await db.collection('products').find(query).sort({ created_at: -1 }).toArray();
-  
-  const enrichedProducts = [];
-  for (const p of products) {
-    const cat = await db.collection('categories').findOne(getQueryById(p.category_id));
-    
-    // Sum variant stock to compute overall stock
-    const totalStock = (p.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
-    
-    const primaryImageObj = (p.images || []).find(img => img.is_primary) || (p.images || [])[0] || null;
-    const primary_image = primaryImageObj ? primaryImageObj.image_url : null;
-    
-    enrichedProducts.push({
-      id: p._id.toString(),
-      name: p.name,
-      slug: p.slug,
-      description: p.description,
-      base_price: String(p.base_price),
-      price_value: Number(p.base_price),
-      discount: Number(p.discount || 0),
-      is_active: !!p.is_active,
-      created_at: p.created_at,
-      updated_at: p.updated_at,
-      stock: totalStock,
-      category: cat ? {
-        id: cat._id.toString(),
-        name: cat.name,
-        slug: cat.slug
-      } : null,
-      category_id: p.category_id,
-      primary_image,
-      image_url: primary_image,
-      gallery_images: (p.images || []).map(img => img.image_url),
-      images: (p.images || []).map(img => ({
-        id: String(img.id),
-        image_url: img.image_url,
-        is_primary: !!img.is_primary
-      })),
-      variants: (p.variants || []).map(v => ({
-        id: String(v.id),
-        sku: v.sku,
-        size: v.size,
-        color: v.color,
-        price_override: v.price_override ? String(v.price_override) : null,
-        stock: v.stock
-      }))
-    });
-  }
-  
-  // Exclude out-of-stock products unless specifically requested (e.g. by admin)
-  let finalProducts = enrichedProducts;
-  if (!params.include_out_of_stock) {
-    finalProducts = finalProducts.filter(p => p.stock > 0);
-  }
-
-  if (params.discount_only) {
-    finalProducts = finalProducts.filter(p => p.discount > 0);
-  }
-
-  if (params.sort_by === 'price_asc') {
-    finalProducts = [...finalProducts].sort((a, b) => a.price_value - b.price_value);
-  } else if (params.sort_by === 'price_desc') {
-    finalProducts = [...finalProducts].sort((a, b) => b.price_value - a.price_value);
-  }
-  // else: keep the default created_at-desc order from the Mongo query above.
-
-  const total = finalProducts.length;
-  // Paginate after the stock filter so page boundaries reflect what's actually shown.
-  if (params.page_size) {
-    const page = Math.max(1, Number(params.page) || 1);
-    const pageSize = Number(params.page_size);
-    const start = (page - 1) * pageSize;
-    finalProducts = finalProducts.slice(start, start + pageSize);
-  }
-
-  return { results: finalProducts, total };
-  },
-  ['products-list'],
-  { tags: ['products'], revalidate: 30 }
-);
 
 export async function getProducts(params = {}) {
-  return getProductsCached(params);
+  return run(() =>
+    queryProducts({
+      category_id: params.category_id || params.category,
+      search: params.search,
+      discount_only: !!params.discount_only,
+      in_stock_only: !!params.in_stock_only,
+      sort_by: params.sort_by,
+      page: params.page,
+      page_size: params.page_size,
+      exclude_id: params.exclude_id,
+    })
+  );
 }
 
 export async function getProduct(id) {
-  const db = await getDb();
-  const p = await db.collection('products').findOne(getQueryById(id));
-  if (!p) return null;
-  
-  const cat = await db.collection('categories').findOne(getQueryById(p.category_id));
-  const totalStock = (p.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
-  const primaryImageObj = (p.images || []).find(img => img.is_primary) || (p.images || [])[0] || null;
-  const primary_image = primaryImageObj ? primaryImageObj.image_url : null;
-  
-  return {
-    id: p._id.toString(),
-    name: p.name,
-    slug: p.slug,
-    description: p.description,
-    base_price: String(p.base_price),
-    price_value: Number(p.base_price),
-    discount: Number(p.discount || 0),
-    is_active: !!p.is_active,
-    created_at: p.created_at,
-    updated_at: p.updated_at,
-    stock: totalStock,
-    category: cat ? {
-      id: cat._id.toString(),
-      name: cat.name,
-      slug: cat.slug
-    } : null,
-    category_id: p.category_id,
-    primary_image,
-    image_url: primary_image,
-    gallery_images: (p.images || []).map(img => img.image_url),
-    images: (p.images || []).map(img => ({
-      id: String(img.id),
-      image_url: img.image_url,
-      is_primary: !!img.is_primary
-    })),
-    variants: (p.variants || []).map(v => ({
-      id: String(v.id),
-      sku: v.sku,
-      size: v.size,
-      color: v.color,
-      price_override: v.price_override ? String(v.price_override) : null,
-      stock: v.stock
-    }))
-  };
+  return run(async () => {
+    const product = await getActiveProduct(id);
+    if (!product) fail('This product is not available.');
+    return product;
+  });
 }
 
-// ── AUTH FUNCTIONS ──
+export async function getTestimonials() {
+  return run(async () => ({ results: await listPublicTestimonialsCached() }));
+}
 
-export async function register(data) {
-  const db = await getDb();
-  const email = data.email?.trim().toLowerCase();
-  const password = data.password;
-  const name = data.full_name || '';
-  
-  if (!email || !password) {
-    throw new Error('Email and password are required.');
-  }
-  
-  const existing = await db.collection('users').findOne({ username: email });
-  if (existing) {
-    throw new Error('An account with this email already exists.');
-  }
-  
-  const hashedPassword = hashPassword(password);
-  const now = getFormattedDate();
-  
-  const result = await db.collection('users').insertOne({
-    password: hashedPassword,
-    last_login: null,
-    is_superuser: false,
-    username: email,
-    last_name: '',
-    email: email,
-    is_active: true,
-    date_joined: now,
-    first_name: name
+export async function submitContactMessage(messageData = {}) {
+  return run(async () => {
+    const doc = {
+      name: cleanText(messageData.name, { max: 80, required: true, label: 'Name' }),
+      email: cleanEmail(messageData.email),
+      subject: cleanText(messageData.subject, { max: 150, label: 'Subject' }) || 'General inquiry',
+      message: cleanMultiline(messageData.message, { max: 3000, required: true, label: 'Message' }),
+      is_read: false,
+      created_at: nowIso(),
+    };
+    const db = await getDb();
+
+    // Basic flood protection: max 5 messages per email per hour.
+    const recent = await db.collection('contactmessages').countDocuments({
+      email: doc.email,
+      created_at: { $gt: new Date(Date.now() - 60 * 60 * 1000).toISOString() },
+    });
+    if (recent >= 5) fail('You have sent several messages recently. We will get back to you soon!');
+
+    const result = await db.collection('contactmessages').insertOne(doc);
+    backgroundTask(() => sendAdminContactMessageEmail(doc));
+    return { id: result.insertedId.toString(), created_at: doc.created_at };
   });
-  
-  const userId = result.insertedId.toString();
-  const token = signToken({ id: userId, email });
-  
-  await setAuthCookie(token);
-  
-  // Welcome Email in background
-  sendWelcomeEmail({ id: userId, email, username: email, full_name: name })
-    .catch(err => console.error('Background Welcome Email failed:', err));
-  
-  return {
-    user: { id: userId, email, full_name: name },
-    access_token: token,
-    access: token,
-    refresh: token
-  };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// AUTH
+// ══════════════════════════════════════════════════════════════════════
+
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_FAILURES = 8;
+
+export async function register(data = {}) {
+  return run(async () => {
+    const db = await getDb();
+    const email = cleanEmail(data.email);
+    const name = cleanText(data.full_name, { max: 80, required: true, label: 'Full name' });
+    const password = String(data.password || '');
+    if (password.length < 8) fail('Password must be at least 8 characters.');
+    if (password.length > 128) fail('Password is too long.');
+
+    const existing = await db.collection('users').findOne({ $or: [{ username: email }, { email }] });
+    if (existing) fail('An account with this email already exists. Please log in.');
+
+    const now = nowIso();
+    const result = await db.collection('users').insertOne({
+      password: hashPassword(password),
+      last_login: now,
+      is_superuser: false,
+      username: email,
+      last_name: '',
+      email,
+      is_active: true,
+      date_joined: now,
+      first_name: name,
+    });
+
+    const userId = result.insertedId.toString();
+    await setAuthCookie(signToken({ id: userId }));
+    backgroundTask(() => sendWelcomeEmail({ id: userId, email, full_name: name }));
+    return { user: { id: userId, email, full_name: name, is_superuser: false } };
+  });
 }
 
 export async function login(email, password) {
-  const db = await getDb();
-  const cleanEmail = email?.trim().toLowerCase();
+  return run(async () => {
+    const db = await getDb();
+    const cleanEmailValue = String(email || '').trim().toLowerCase();
+    if (!cleanEmailValue || !password) fail('Please enter your email and password.');
 
-  const user = await db.collection('users').findOne({ username: cleanEmail });
-  if (!user || !verifyPassword(password, user.password)) {
-    throw new Error('Invalid credentials.');
-  }
-  
-  if (!user.is_active) {
-    throw new Error('Account is disabled.');
-  }
-  
-  const now = getFormattedDate();
-  await db.collection('users').updateOne({ _id: user._id }, { $set: { last_login: now } });
-  
-  const userId = user._id.toString();
-  const token = signToken({ id: userId, email: user.email });
-  await setAuthCookie(token);
-  
-  return {
-    user: {
-      id: userId,
-      email: user.email,
-      full_name: user.first_name,
-      is_superuser: !!user.is_superuser
-    },
-    token: token,
-    access: token,
-    refresh: token
-  };
-}
+    const since = new Date(Date.now() - LOGIN_WINDOW_MS);
+    const failures = await db.collection('login_attempts').countDocuments({ key: cleanEmailValue, at: { $gt: since } });
+    if (failures >= LOGIN_MAX_FAILURES) fail('Too many failed attempts. Please wait 15 minutes and try again.');
 
-export async function getMe() {
-  const user = await getAuthenticatedUser();
-  if (!user) throw new Error('Unauthenticated');
-  return user;
-}
+    const user = await db.collection('users').findOne({ $or: [{ username: cleanEmailValue }, { email: cleanEmailValue }] });
+    if (!user || !verifyPassword(password, user.password)) {
+      await db.collection('login_attempts').insertOne({ key: cleanEmailValue, at: new Date() });
+      fail('Invalid email or password.');
+    }
+    if (!user.is_active) fail('This account has been disabled. Please contact us.');
 
-export async function updateProfile(data) {
-  const currentUser = await getAuthenticatedUser();
-  if (!currentUser) throw new Error('Unauthenticated');
-  
-  const db = await getDb();
-  const { full_name, password } = data;
-  const updates = {};
-  
-  if (full_name) updates.first_name = full_name;
-  if (password) updates.password = hashPassword(password);
-  
-  if (Object.keys(updates).length > 0) {
-    await db.collection('users').updateOne(getQueryById(currentUser.id), { $set: updates });
-  }
-  
-  const updated = await db.collection('users').findOne(getQueryById(currentUser.id));
-  return {
-    id: updated._id.toString(),
-    email: updated.email,
-    full_name: updated.first_name,
-    is_superuser: !!updated.is_superuser
-  };
+    await db.collection('login_attempts').deleteMany({ key: cleanEmailValue });
+    await db.collection('users').updateOne({ _id: user._id }, { $set: { last_login: nowIso() } });
+    await setAuthCookie(signToken({ id: user._id.toString() }));
+    return { user: publicUser(user) };
+  });
 }
 
 export async function logout() {
-  await deleteAuthCookie();
-  return { detail: 'Successfully logged out.' };
+  return run(async () => {
+    const cookieStore = await cookies();
+    cookieStore.delete('auth_token');
+    return { detail: 'Logged out.' };
+  });
 }
 
-// ── CART FUNCTIONS ──
+export async function getMe() {
+  return run(() => getAuthenticatedUser());
+}
+
+export async function updateProfile(data = {}) {
+  return run(async () => {
+    const currentUser = await requireUser();
+    const db = await getDb();
+    const updates = {};
+
+    if (data.full_name !== undefined) {
+      updates.first_name = cleanText(data.full_name, { max: 80, required: true, label: 'Full name' });
+    }
+    if (data.password) {
+      const password = String(data.password);
+      if (password.length < 8) fail('New password must be at least 8 characters.');
+      const userDoc = await db.collection('users').findOne(getQueryById(currentUser.id));
+      if (!verifyPassword(String(data.current_password || ''), userDoc.password)) fail('Your current password is incorrect.');
+      updates.password = hashPassword(password);
+      updates.password_changed_at = nowIso();
+    }
+
+    if (Object.keys(updates).length) {
+      await db.collection('users').updateOne(getQueryById(currentUser.id), { $set: updates });
+    }
+    if (updates.password) {
+      // Old sessions are now invalid — issue a fresh one for this device.
+      await setAuthCookie(signToken({ id: currentUser.id }));
+    }
+    const updated = await db.collection('users').findOne(getQueryById(currentUser.id));
+    return publicUser(updated);
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// CART
+// ══════════════════════════════════════════════════════════════════════
+
+async function buildCart(db, cart) {
+  const ids = (cart.items || []).map((i) => i.product_id);
+  const products = ids.length
+    ? await db.collection('products').find({ $or: ids.flatMap((id) => getQueryById(id).$or || [getQueryById(id)]) }).toArray()
+    : [];
+  const byId = Object.fromEntries(products.map((p) => [p._id.toString(), p]));
+
+  const items = [];
+  for (const item of cart.items || []) {
+    const p = byId[String(item.product_id)];
+    if (!p || !p.is_active) continue; // disabled/deleted products silently drop out of the cart
+    const variant = (p.variants || [])[0];
+    if (!variant) continue;
+    const stock = Math.max(0, Number(variant.stock || 0));
+    const price = effectivePrice(variant.price_override || p.base_price, p.discount);
+    items.push({
+      id: p._id.toString(),
+      product_id: p._id.toString(),
+      name: p.name,
+      image: primaryImageOf(p),
+      quantity: Number(item.quantity || 1),
+      price,
+      mrp: Number(variant.price_override || p.base_price || 0),
+      stock,
+    });
+  }
+  return { id: cart._id.toString(), items };
+}
 
 export async function fetchActiveCart() {
-  const user = await getAuthenticatedUser();
-  if (!user) return null;
-  
-  const db = await getDb();
-  let cart = await db.collection('carts').findOne({ user_id: user.id });
-  
-  if (!cart) {
-    const now = getFormattedDate();
-    const result = await db.collection('carts').insertOne({
-      session_id: null,
-      created_at: now,
-      updated_at: now,
-      user_id: user.id,
-      items: []
-    });
-    cart = { _id: result.insertedId, user_id: user.id, items: [] };
-  }
-  
-  const mappedItems = [];
-  for (const item of cart.items || []) {
-    const p = await db.collection('products').findOne(getQueryById(item.product_id));
-    if (p) {
-      const variant = (p.variants || []).find(v => String(v.id) === String(item.variant_id)) || (p.variants || [])[0];
-      if (variant) {
-        // Calculate discounted price:
-        const originalPrice = variant.price_override || p.base_price;
-        const discount = p.discount || 0;
-        const effectivePrice = Math.round(originalPrice * (1 - discount / 100));
-        
-        const imgObj = (p.images || []).find(img => img.is_primary) || (p.images || [])[0] || null;
-        
-        mappedItems.push({
-          id: String(item.id || item.variant_id), // line-item ID fallback
-          quantity: item.quantity,
-          price: String(effectivePrice),
-          variant: {
-            id: String(variant.id),
-            sku: variant.sku,
-            size: variant.size,
-            color: variant.color,
-            price_override: variant.price_override ? String(variant.price_override) : null,
-            stock: variant.stock
-          },
-          product: {
-            id: p._id.toString(),
-            name: p.name,
-            price_value: effectivePrice,
-            image_url: imgObj ? imgObj.image_url : null
-          }
-        });
-      }
+  return run(async () => {
+    const user = await getAuthenticatedUser();
+    if (!user) return null;
+    const db = await getDb();
+    let cart = await db.collection('carts').findOne({ user_id: user.id });
+    if (!cart) {
+      const now = nowIso();
+      const res = await db.collection('carts').insertOne({ user_id: user.id, items: [], created_at: now, updated_at: now });
+      cart = { _id: res.insertedId, items: [] };
     }
-  }
-  
-  return {
-    id: cart._id.toString(),
-    user: cart.user_id,
-    items: mappedItems
-  };
+    return buildCart(db, cart);
+  });
 }
 
-export async function createCart(payload = {}) {
-  const user = await getAuthenticatedUser();
-  if (!user) throw new Error('Unauthenticated');
-  
-  const db = await getDb();
-  const now = getFormattedDate();
-  
-  const result = await db.collection('carts').insertOne({
-    session_id: null,
-    created_at: now,
-    updated_at: now,
-    user_id: user.id,
-    items: []
-  });
-    
-  return {
-    id: result.insertedId.toString(),
-    user: user.id,
-    items: []
-  };
-}
+/** Replaces the user's cart lines. Quantities are clamped to available stock. */
+export async function updateCart(_cartId, payload = {}) {
+  return run(async () => {
+    const user = await requireUser();
+    const db = await getDb();
 
-export async function updateCart(cartId, payload) {
-  const user = await getAuthenticatedUser();
-  if (!user) throw new Error('Unauthenticated');
-  
-  const db = await getDb();
-  const cart = await db.collection('carts').findOne({
-    $and: [
-      getQueryById(cartId),
-      { user_id: user.id }
-    ]
-  });
-  if (!cart) throw new Error('Cart not found');
-  
-  const updatedItems = [];
-  for (const item of payload.items || []) {
-    const productId = item.product;
-    const quantity = item.quantity || 1;
-    
-    const product = await db.collection('products').findOne(getQueryById(productId));
-    if (product && product.variants && product.variants.length > 0) {
-      const variant = product.variants[0];
-      updatedItems.push({
-        id: crypto.randomUUID(),
-        quantity,
-        variant_id: String(variant.id),
-        product_id: product._id.toString()
-      });
+    const merged = new Map();
+    for (const raw of (payload.items || []).slice(0, 30)) {
+      const pid = String(raw?.product || raw?.product_id || '').trim();
+      const qty = Math.floor(Number(raw?.quantity));
+      if (!pid || !Number.isFinite(qty) || qty < 1) continue;
+      merged.set(pid, Math.min(20, (merged.get(pid) || 0) + qty));
     }
-  }
-  
-  const now = getFormattedDate();
-  await db.collection('carts').updateOne(
-    { _id: cart._id },
-    { $set: { items: updatedItems, updated_at: now } }
-  );
-  
-  return fetchActiveCart();
+
+    const items = [];
+    for (const [pid, qty] of merged) {
+      const p = await db.collection('products').findOne(getQueryById(pid), { projection: { variants: 1, is_active: 1 } });
+      const variant = p?.variants?.[0];
+      if (!p || !p.is_active || !variant) continue;
+      const stock = Math.max(0, Number(variant.stock || 0));
+      if (stock < 1) continue;
+      items.push({ id: crypto.randomUUID(), product_id: p._id.toString(), variant_id: String(variant.id), quantity: Math.min(qty, stock) });
+    }
+
+    const now = nowIso();
+    await db.collection('carts').updateOne(
+      { user_id: user.id },
+      { $set: { items, updated_at: now }, $setOnInsert: { created_at: now } },
+      { upsert: true }
+    );
+    const cart = await db.collection('carts').findOne({ user_id: user.id });
+    return buildCart(db, cart);
+  });
 }
 
-// ── ADDRESS & CONTACT FUNCTIONS ──
+// ══════════════════════════════════════════════════════════════════════
+// ADDRESSES & CONTACTS
+// ══════════════════════════════════════════════════════════════════════
 
 export async function getAddresses() {
-  const user = await getAuthenticatedUser();
-  if (!user) throw new Error('Unauthenticated');
-  
-  const db = await getDb();
-  const addresses = await db.collection('addresses').find({ user_id: user.id }).toArray();
-  return addresses.map(({ _id, ...addr }) => ({ ...addr, id: _id.toString() }));
+  return run(async () => {
+    const user = await requireUser();
+    const db = await getDb();
+    const rows = await db.collection('addresses').find({ user_id: user.id }).sort({ is_default: -1, created_at: -1 }).toArray();
+    return rows.map(({ _id, user_id, ...a }) => ({ ...a, id: _id.toString() }));
+  });
 }
 
-export async function addAddress(payload) {
-  const user = await getAuthenticatedUser();
-  if (!user) throw new Error('Unauthenticated');
-  
-  const db = await getDb();
-  const is_default = payload.is_default ? true : false;
-  const now = getFormattedDate();
-  
-  if (is_default) {
-    await db.collection('addresses').updateMany({ user_id: user.id }, { $set: { is_default: false } });
-  }
-  
-  const result = await db.collection('addresses').insertOne({
-    full_name: payload.full_name,
-    address_line: payload.address_line,
-    city: payload.city,
-    state: payload.state,
-    pincode: payload.pincode,
-    is_default: is_default,
-    created_at: now,
-    user_id: user.id
+export async function addAddress(payload = {}) {
+  return run(async () => {
+    const user = await requireUser();
+    const db = await getDb();
+    const count = await db.collection('addresses').countDocuments({ user_id: user.id });
+    if (count >= 10) fail('You can save up to 10 addresses.');
+
+    const doc = {
+      full_name: cleanText(payload.full_name, { max: 80, required: true, label: 'Full name' }),
+      address_line: cleanText(payload.address_line, { max: 300, required: true, label: 'Address' }),
+      city: cleanText(payload.city, { max: 60, required: true, label: 'City' }),
+      state: cleanText(payload.state, { max: 60, required: true, label: 'State' }),
+      pincode: cleanPincode(payload.pincode),
+      is_default: !!payload.is_default || count === 0,
+      created_at: nowIso(),
+      user_id: user.id,
+    };
+    if (doc.is_default) await db.collection('addresses').updateMany({ user_id: user.id }, { $set: { is_default: false } });
+    const res = await db.collection('addresses').insertOne(doc);
+    const { _id, user_id, ...rest } = doc;
+    return { ...rest, id: res.insertedId.toString() };
   });
-  
-  return { id: result.insertedId.toString(), ...payload, is_default };
 }
 
 export async function setDefaultAddress(id) {
-  const user = await getAuthenticatedUser();
-  if (!user) throw new Error('Unauthenticated');
-  
-  const db = await getDb();
-  const addr = await db.collection('addresses').findOne({ _id: id, user_id: user.id });
-  if (!addr) throw new Error('Address not found');
-  
-  await db.collection('addresses').updateMany({ user_id: user.id }, { $set: { is_default: false } });
-  await db.collection('addresses').updateOne({ _id: id }, { $set: { is_default: true } });
-  
-  return { success: true };
+  return run(async () => {
+    const user = await requireUser();
+    const db = await getDb();
+    const addr = await db.collection('addresses').findOne({ ...getQueryById(id), user_id: user.id });
+    if (!addr) fail('Address not found.');
+    await db.collection('addresses').updateMany({ user_id: user.id }, { $set: { is_default: false } });
+    await db.collection('addresses').updateOne({ _id: addr._id }, { $set: { is_default: true } });
+    return { success: true };
+  });
+}
+
+export async function deleteAddress(id) {
+  return run(async () => {
+    const user = await requireUser();
+    const db = await getDb();
+    await db.collection('addresses').deleteOne({ ...getQueryById(id), user_id: user.id });
+    return { success: true };
+  });
 }
 
 export async function getContacts() {
-  const user = await getAuthenticatedUser();
-  if (!user) throw new Error('Unauthenticated');
-  
-  const db = await getDb();
-  const contacts = await db.collection('contacts').find({ user_id: user.id }).toArray();
-  return contacts.map(({ _id, ...c }) => ({ ...c, id: _id.toString() }));
+  return run(async () => {
+    const user = await requireUser();
+    const db = await getDb();
+    const rows = await db.collection('contacts').find({ user_id: user.id }).sort({ is_default: -1, created_at: -1 }).toArray();
+    return rows.map(({ _id, user_id, ...c }) => ({ ...c, id: _id.toString() }));
+  });
 }
 
-export async function addContact(payload) {
-  const user = await getAuthenticatedUser();
-  if (!user) throw new Error('Unauthenticated');
-  
-  const db = await getDb();
-  const is_default = payload.is_default ? true : false;
-  const now = getFormattedDate();
-  
-  if (is_default) {
-    await db.collection('contacts').updateMany({ user_id: user.id }, { $set: { is_default: false } });
-  }
-  
-  const result = await db.collection('contacts').insertOne({
-    phone_number: payload.phone_number,
-    is_default: is_default,
-    created_at: now,
-    user_id: user.id
+export async function addContact(payload = {}) {
+  return run(async () => {
+    const user = await requireUser();
+    const db = await getDb();
+    const count = await db.collection('contacts').countDocuments({ user_id: user.id });
+    if (count >= 10) fail('You can save up to 10 phone numbers.');
+    const doc = {
+      phone_number: cleanPhone(payload.phone_number),
+      is_default: !!payload.is_default || count === 0,
+      created_at: nowIso(),
+      user_id: user.id,
+    };
+    if (doc.is_default) await db.collection('contacts').updateMany({ user_id: user.id }, { $set: { is_default: false } });
+    const res = await db.collection('contacts').insertOne(doc);
+    const { _id, user_id, ...rest } = doc;
+    return { ...rest, id: res.insertedId.toString() };
   });
-  
-  return { id: result.insertedId.toString(), ...payload, is_default };
 }
 
 export async function setDefaultContact(id) {
-  const user = await getAuthenticatedUser();
-  if (!user) throw new Error('Unauthenticated');
-  
-  const db = await getDb();
-  const contact = await db.collection('contacts').findOne({ _id: id, user_id: user.id });
-  if (!contact) throw new Error('Contact not found');
-  
-  await db.collection('contacts').updateMany({ user_id: user.id }, { $set: { is_default: false } });
-  await db.collection('contacts').updateOne({ _id: id }, { $set: { is_default: true } });
-  
-  return { success: true };
+  return run(async () => {
+    const user = await requireUser();
+    const db = await getDb();
+    const contact = await db.collection('contacts').findOne({ ...getQueryById(id), user_id: user.id });
+    if (!contact) fail('Phone number not found.');
+    await db.collection('contacts').updateMany({ user_id: user.id }, { $set: { is_default: false } });
+    await db.collection('contacts').updateOne({ _id: contact._id }, { $set: { is_default: true } });
+    return { success: true };
+  });
 }
 
-// ── ORDERS & CHECKOUT FUNCTIONS ──
+// ══════════════════════════════════════════════════════════════════════
+// CUSTOMER REVIEWS
+// ══════════════════════════════════════════════════════════════════════
 
-export async function createOrder(payload) {
-  const user = await getAuthenticatedUser();
-  const db = await getDb();
-  const now = getFormattedDate();
-  
-  const orderId = crypto.randomUUID();
-  const payment_reference = `PAY-SCS-${Math.floor(100000 + Math.random() * 900000)}`;
-  
-  const upi_transaction_id = payload.upi_transaction_id || payload.payment_id || null;
-  const screenshot_id = payload.screenshot_id || null;
-  
-  const orderItems = [];
-  const items = payload.items || [];
-  let stockChanged = false;
-  for (const item of items) {
-    const p = await db.collection('products').findOne(getQueryById(item.product_id));
-    if (p && p.variants && p.variants.length > 0) {
-      const variant = p.variants[0];
-      const quantity = item.quantity || 1;
+export async function getMyTestimonial() {
+  return run(async () => {
+    const user = await requireUser();
+    const db = await getDb();
+    const t = await db.collection('testimonials').findOne({ user_id: user.id });
+    return t ? serializeTestimonial(t) : null;
+  });
+}
 
-      // Recompute price server-side from the product's current discount/base_price —
-      // never trust the client-submitted price, which may be stale or manipulated.
-      const originalPrice = variant.price_override || p.base_price;
-      const effectivePrice = Math.round(originalPrice * (1 - (p.discount || 0) / 100));
+export async function submitTestimonial(payload = {}) {
+  return run(async () => {
+    const user = await requireUser();
+    const settings = await getSettings();
+    const content = cleanMultiline(payload.content, { max: 1000, required: true, label: 'Your review' });
+    const rating = Math.min(5, Math.max(1, Math.round(Number(payload.rating) || 5)));
+    const autoApprove = !!settings.reviews.auto_approve;
 
-      orderItems.push({
-        id: crypto.randomUUID(),
-        quantity,
-        price: effectivePrice,
-        variant_id: String(variant.id),
-        product_id: p._id.toString()
+    const db = await getDb();
+    const now = nowIso();
+    const existing = await db.collection('testimonials').findOne({ user_id: user.id });
+    const fields = { content, rating, updated_at: now, is_active: autoApprove, reviewed: autoApprove };
+
+    if (existing) {
+      await db.collection('testimonials').updateOne({ _id: existing._id }, { $set: fields });
+    } else {
+      await db.collection('testimonials').insertOne({
+        ...fields,
+        user_id: user.id,
+        author_name: user.full_name || user.email.split('@')[0],
+        source: 'customer',
+        created_at: now,
       });
-
-      // Reduce stock of variant in MongoDB!
-      const newStock = Math.max(0, (variant.stock || 0) - quantity);
-      await db.collection('products').updateOne(
-        { _id: p._id, "variants.id": variant.id },
-        { $set: { "variants.$.stock": newStock } }
-      );
-      stockChanged = true;
     }
-  }
-  if (stockChanged) revalidateTag('products');
+    invalidate('testimonials');
+    return { content, rating, pending: !autoApprove };
+  });
+}
 
-  const total_amount = orderItems.reduce((sum, oi) => sum + oi.price * oi.quantity, 0);
+// ══════════════════════════════════════════════════════════════════════
+// ORDERS & PAYMENTS (customer)
+// ══════════════════════════════════════════════════════════════════════
 
-  const orderDoc = {
-    _id: orderId,
-    status: payload.status || 'PENDING',
-    total_amount,
-    shipping_address: payload.shipping_address || '',
-    created_at: now,
-    updated_at: now,
-    user_id: user ? user.id : null,
-    city: payload.city || null,
-    customer_email: payload.customer_email || (user ? user.email : null),
-    customer_name: payload.customer_name || (user ? user.full_name : null),
-    customer_phone: payload.customer_phone || null,
-    pincode: payload.pincode || null,
-    screenshot_id: screenshot_id,
-    state: payload.state || null,
-    payment_status: payload.payment_status || 'PENDING',
-    upi_transaction_id: upi_transaction_id,
-    payment_reference: payment_reference,
-    cancelled_at: null,
-    delivered_at: null,
-    payment_verified_at: null,
-    processing_at: null,
-    shipped_at: null,
-    items: orderItems
-  };
-  
-  await db.collection('orders').insertOne(orderDoc);
-  
-  // Clear cart
-  if (user) {
-    await db.collection('carts').updateOne({ user_id: user.id }, { $set: { items: [], updated_at: now } });
-  }
-  
-  // Create payment record
-  if (upi_transaction_id || screenshot_id) {
-    await db.collection('payments').insertOne({
-      _id: crypto.randomUUID(),
-      amount: total_amount,
-      screenshot_url: screenshot_id,
-      status: upi_transaction_id ? 'VERIFIED' : 'PENDING',
-      submitted_at: now,
-      received_at: upi_transaction_id ? now : null,
-      confirmed_at: now,
-      created_at: now,
-      order_id: orderId,
-      user_id: user ? user.id : null,
-      payment_reference: payment_reference,
-      upi_transaction_id: upi_transaction_id
-    });
-  }
-  
-  // Send email confirmation in the background with PDF attachment
-  const customerEmail = payload.customer_email || (user ? user.email : null);
-  if (customerEmail) {
-    const emailOrderData = {
-      id: orderId,
-      customer_name: payload.customer_name || (user ? user.full_name : 'Customer'),
-      customer_email: customerEmail,
-      customer_phone: payload.customer_phone || null,
-      shipping_address: payload.shipping_address || '',
-      total_amount,
-      payment_reference: payment_reference,
-      upi_transaction_id: upi_transaction_id,
-      created_at: now,
-      user_id: user ? user.id : null,
-      items: orderItems.map(item => ({
-        name: items.find(i => String(i.product_id) === String(item.product_id))?.name || 'Product',
-        quantity: item.quantity,
-        price: item.price
-      }))
-    };
-    sendOrderConfirmationEmail(emailOrderData)
-      .catch(err => console.error('Background Order Confirmation Email failed:', err));
-  }
-  
-  return getOrder(orderId);
+async function ownedOrderDoc(id) {
+  const user = await requireUser();
+  const doc = await findOrderDoc(id);
+  if (!doc || (!user.is_superuser && String(doc.user_id) !== user.id)) fail('Order not found.');
+  return { user, doc };
+}
+
+export async function createOrder(payload = {}) {
+  return run(async () => {
+    const user = await requireUser();
+    return placeOrder(user, payload);
+  });
 }
 
 export async function getOrder(id) {
-  const db = await getDb();
-  const order = await db.collection('orders').findOne(getQueryById(id));
-  if (!order) return null;
-  
-  const items = [];
-  for (const item of order.items || []) {
-    const p = await db.collection('products').findOne(getQueryById(item.product_id));
-    if (p) {
-      const variant = (p.variants || []).find(v => String(v.id) === String(item.variant_id)) || (p.variants || [])[0];
-      const primaryImageObj = (p.images || []).find(img => img.is_primary) || (p.images || [])[0] || null;
-      const imageUrl = primaryImageObj ? primaryImageObj.image_url : null;
-      
-      items.push({
-        id: item.id,
-        quantity: item.quantity,
-        price: String(item.price),
-        image: imageUrl,
-        variant: variant ? {
-          id: String(variant.id),
-          sku: variant.sku,
-          size: variant.size,
-          color: variant.color
-        } : null,
-        product: {
-          id: p._id.toString(),
-          name: p.name,
-          primary_image: imageUrl
-        }
-      });
-    }
-  }
-  
-  return {
-    id: order._id.toString(),
-    status: order.status,
-    total_amount: String(order.total_amount),
-    shipping_address: order.shipping_address,
-    created_at: order.created_at,
-    updated_at: order.updated_at,
-    city: order.city,
-    customer_email: order.customer_email,
-    customer_name: order.customer_name,
-    customer_phone: order.customer_phone,
-    pincode: order.pincode,
-    screenshot_id: order.screenshot_id,
-    state: order.state,
-    payment_status: order.payment_status,
-    payment_reference: order.payment_reference,
-    upi_transaction_id: order.upi_transaction_id,
-    cancelled_at: order.cancelled_at,
-    delivered_at: order.delivered_at,
-    payment_verified_at: order.payment_verified_at,
-    processing_at: order.processing_at,
-    shipped_at: order.shipped_at,
-    items
-  };
+  return run(async () => {
+    const { user, doc } = await ownedOrderDoc(id);
+    return loadOrder(doc._id, { admin: user.is_superuser });
+  });
 }
 
 export async function getMyOrders(params = {}) {
-  const user = await getAuthenticatedUser();
-  if (!user) return [];
-  
-  const db = await getDb();
-  const orders = await db.collection('orders').find({ user_id: user.id }).sort({ created_at: -1 }).toArray();
-  
-  const results = [];
-  for (const o of orders) {
-    const orderDetails = await getOrder(o._id.toString());
-    if (orderDetails) results.push(orderDetails);
-  }
-  return results;
-}
-
-export async function getOrders(email = null, params = {}) {
-  const user = await getAuthenticatedUser();
-  if (!user) return { results: [], total: 0 };
-
-  const db = await getDb();
-  const query = {};
-
-  if (!user.is_superuser) {
-    query.user_id = user.id;
-  } else if (email) {
-    query.customer_email = email;
-  }
-
-  if (params.status) query.status = params.status;
-  if (params.payment_status) query.payment_status = params.payment_status;
-
-  const total = await db.collection('orders').countDocuments(query);
-
-  let cursor = db.collection('orders').find(query).sort({ created_at: -1 });
-  if (params.page_size) {
+  return run(async () => {
+    const user = await requireUser();
+    const db = await getDb();
     const page = Math.max(1, Number(params.page) || 1);
-    const pageSize = Number(params.page_size);
-    cursor = cursor.skip((page - 1) * pageSize).limit(pageSize);
-  }
-  const orders = await cursor.toArray();
-
-  const results = [];
-  for (const o of orders) {
-    const orderDetails = await getOrder(o._id.toString());
-    if (orderDetails) results.push(orderDetails);
-  }
-  return { results, total };
+    const pageSize = Math.min(50, Math.max(1, Number(params.page_size) || 10));
+    const query = { user_id: user.id };
+    const [total, docs] = await Promise.all([
+      db.collection('orders').countDocuments(query),
+      db.collection('orders').find(query).sort({ created_at: -1 }).skip((page - 1) * pageSize).limit(pageSize).toArray(),
+    ]);
+    return { results: await serializeOrders(db, docs), total };
+  });
 }
 
-// ── PAYMENTS ──
-
-export async function getPayments(params = {}) {
-  const user = await getAuthenticatedUser();
-  if (!user) return [];
-  
-  const db = await getDb();
-  const query = {};
-  if (!user.is_superuser) {
-    query.user_id = user.id;
-  }
-  
-  const payments = await db.collection('payments').find(query).sort({ created_at: -1 }).toArray();
-  return {
-    results: payments.map(({ _id, ...p }) => ({
-      ...p,
-      id: _id.toString()
-    }))
-  };
+/** Kept for the existing /orders page (always the caller's own orders). */
+export async function getOrders(_email = null, params = {}) {
+  return getMyOrders(params);
 }
 
-// ── SCREENSHOT UPLOAD ──
+export async function cancelMyOrder(id, reason = '') {
+  return run(async () => {
+    const { user, doc } = await ownedOrderDoc(id);
+    const status = String(doc.status || '').toUpperCase();
+    if (!['PENDING', 'CONFIRMED'].includes(status)) fail('This order is already being prepared. Please contact us to make changes.');
+    if (String(doc.payment_status).toUpperCase() === 'VERIFIED') {
+      fail('This order is already paid. Please contact us and we will cancel it and refund you.');
+    }
+    return changeOrderStatus(doc._id, 'CANCELLED', user.is_superuser ? user : 'customer', {
+      cancel_reason: cleanText(reason, { max: 200 }) || 'Cancelled by customer',
+    });
+  });
+}
 
 export async function uploadScreenshot(formData) {
-  const file = formData.get('file');
-  if (!file) throw new Error('No file uploaded.');
-  
-  const bytes = await file.arrayBuffer();
-  const buffer = Buffer.from(bytes);
-  
-  const ext = path.extname(file.name) || '.jpeg';
-  const filename = `screenshots/${crypto.randomUUID()}${ext}`;
-  
-  // uploadFile returns GCS public URL if config exists, or local /media/... path
-  const publicUrl = await uploadFile(buffer, filename, file.type || 'image/jpeg');
-  
-  return { id: publicUrl, url: publicUrl };
-}
-
-// ── MESSAGING ──
-
-export async function submitContactMessage(messageData) {
-  const db = await getDb();
-  const now = getFormattedDate();
-  
-  const result = await db.collection('contactmessages').insertOne({
-    name: messageData.name,
-    email: messageData.email,
-    subject: messageData.subject,
-    message: messageData.message,
-    is_read: false,
-    created_at: now
+  return run(async () => {
+    await requireUser();
+    try {
+      const url = await uploadImageFile(formData?.get('file'), 'screenshots');
+      return { id: url, url };
+    } catch (err) {
+      if (err instanceof UploadError) fail(err.message);
+      throw err;
+    }
   });
-  
-  return { id: result.insertedId.toString(), ...messageData, is_read: false, created_at: now };
 }
 
-// ── ADMIN FUNCTIONS ──
+// ══════════════════════════════════════════════════════════════════════
+// ADMIN — dashboard
+// ══════════════════════════════════════════════════════════════════════
+
+const IST = 'Asia/Kolkata';
 
 export async function getAdminStats(range = '7d') {
-  const user = await getAuthenticatedUser();
-  if (!user || !user.is_superuser) throw new Error('Unauthorized');
-  
-  const db = await getDb();
-  
-  // Total Revenue
-  const revOrders = await db.collection('orders').find({ status: { $ne: 'CANCELLED' } }).toArray();
-  const totalRevenue = revOrders.reduce((sum, o) => sum + (o.total_amount || 0), 0);
-  
-  // Total Orders
-  const totalOrders = await db.collection('orders').countDocuments();
-  
-  // Pending Orders (status is PENDING or PROCESSING)
-  const pendingOrders = await db.collection('orders').countDocuments({ status: { $in: ['PENDING', 'PROCESSING'] } });
-  
-  // Active Products
-  const totalProducts = await db.collection('products').countDocuments();
-  
-  // Messages stats
-  const totalMessages = await db.collection('contactmessages').countDocuments();
-  const unreadMessages = await db.collection('contactmessages').countDocuments({ is_read: false });
-  const readMessages = totalMessages - unreadMessages;
+  return run(async () => {
+    await requireAdmin();
+    const db = await getDb();
+    const now = new Date();
 
-  // Active Carts (non-empty carts)
-  const activeCartsCount = await db.collection('carts').countDocuments({ "items.0": { $exists: true } });
-
-  // Sales and Profit over selected range
-  const dailyStats = [];
-  const now = new Date();
-  
-  if (range === '7d') {
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(now.getDate() - i);
-      d.setHours(0,0,0,0);
-      const startStr = d.toISOString();
-      const dEnd = new Date(d);
-      dEnd.setHours(23,59,59,999);
-      const endStr = dEnd.toISOString();
-      
-      const dayOrders = await db.collection('orders').find({
-        created_at: { $gte: startStr, $lte: endStr },
-        status: { $ne: 'CANCELLED' }
-      }).toArray();
-      
-      const daySales = dayOrders.reduce((sum, o) => sum + (o.total_amount || 0), 0);
-      const dayCount = dayOrders.length;
-      
-      dailyStats.push({
-        label: d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' }),
-        sales: daySales,
-        orders: dayCount
-      });
-    }
-  } else if (range === '1m') {
-    for (let i = 29; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(now.getDate() - i);
-      d.setHours(0,0,0,0);
-      const startStr = d.toISOString();
-      const dEnd = new Date(d);
-      dEnd.setHours(23,59,59,999);
-      const endStr = dEnd.toISOString();
-      
-      const dayOrders = await db.collection('orders').find({
-        created_at: { $gte: startStr, $lte: endStr },
-        status: { $ne: 'CANCELLED' }
-      }).toArray();
-      
-      const daySales = dayOrders.reduce((sum, o) => sum + (o.total_amount || 0), 0);
-      const dayCount = dayOrders.length;
-      
-      dailyStats.push({
-        label: d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' }),
-        sales: daySales,
-        orders: dayCount
-      });
-    }
-  } else if (range === '1y') {
-    for (let i = 11; i >= 0; i--) {
-      const d = new Date();
-      d.setMonth(now.getMonth() - i);
-      d.setDate(1);
-      d.setHours(0,0,0,0);
-      const startStr = d.toISOString();
-      
-      const dEnd = new Date(d);
-      dEnd.setMonth(dEnd.getMonth() + 1);
-      dEnd.setDate(0); // last day of month
-      dEnd.setHours(23,59,59,999);
-      const endStr = dEnd.toISOString();
-      
-      const monthOrders = await db.collection('orders').find({
-        created_at: { $gte: startStr, $lte: endStr },
-        status: { $ne: 'CANCELLED' }
-      }).toArray();
-      
-      const monthSales = monthOrders.reduce((sum, o) => sum + (o.total_amount || 0), 0);
-      const monthCount = monthOrders.length;
-      
-      dailyStats.push({
-        label: d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
-        sales: monthSales,
-        orders: monthCount
-      });
-    }
-  } else if (range === 'all') {
-    const allOrders = await db.collection('orders').find({ status: { $ne: 'CANCELLED' } }).sort({ created_at: 1 }).toArray();
-    const groups = {};
-    for (const o of allOrders) {
-      if (!o.created_at) continue;
-      const date = new Date(o.created_at);
-      const key = date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-      if (!groups[key]) {
-        groups[key] = { sales: 0, orders: 0, time: date.getTime() };
+    let start = null;
+    let format = '%Y-%m-%d';
+    let buckets = [];
+    if (range === '7d' || range === '1m') {
+      const days = range === '7d' ? 7 : 30;
+      start = new Date(now.getTime() - (days - 1) * 86400000);
+      for (let i = days - 1; i >= 0; i--) {
+        const d = new Date(now.getTime() - i * 86400000);
+        buckets.push({
+          key: d.toLocaleDateString('en-CA', { timeZone: IST }),
+          label: d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: IST }),
+        });
       }
-      groups[key].sales += (o.total_amount || 0);
-      groups[key].orders += 1;
+    } else if (range === '1y') {
+      format = '%Y-%m';
+      start = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+      for (let i = 11; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 15);
+        buckets.push({
+          key: d.toLocaleDateString('en-CA', { timeZone: IST }).slice(0, 7),
+          label: d.toLocaleDateString('en-IN', { month: 'short', year: '2-digit', timeZone: IST }),
+        });
+      }
+    } else {
+      format = '%Y-%m';
     }
-    
-    const sortedKeys = Object.keys(groups).sort((a, b) => groups[a].time - groups[b].time);
-    for (const key of sortedKeys) {
-      dailyStats.push({
-        label: key,
-        sales: groups[key].sales,
-        orders: groups[key].orders
+    if (start) start.setHours(0, 0, 0, 0);
+
+    const match = { status: { $ne: 'CANCELLED' } };
+    if (start) match.created_at = { $gte: start.toISOString() };
+
+    const grouped = await db
+      .collection('orders')
+      .aggregate([
+        { $match: match },
+        {
+          $group: {
+            _id: { $dateToString: { format, date: { $dateFromString: { dateString: '$created_at' } }, timezone: IST } },
+            orders: { $sum: 1 },
+            sales: { $sum: { $cond: [{ $eq: [{ $toUpper: '$payment_status' }, 'VERIFIED'] }, { $toDouble: '$total_amount' }, 0] } },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ])
+      .toArray();
+    const byKey = Object.fromEntries(grouped.map((g) => [g._id, g]));
+
+    if (!buckets.length) {
+      buckets = grouped.map((g) => {
+        const [y, m] = g._id.split('-');
+        return { key: g._id, label: new Date(Number(y), Number(m) - 1, 15).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' }) };
       });
     }
-    
-    if (dailyStats.length === 0) {
-      dailyStats.push({ label: 'No Data', sales: 0, orders: 0 });
-    }
-  }
+    const daily_stats = buckets.map((b) => ({ label: b.label, sales: byKey[b.key]?.sales || 0, orders: byKey[b.key]?.orders || 0 }));
+    if (!daily_stats.length) daily_stats.push({ label: 'No data', sales: 0, orders: 0 });
 
-  return {
-    total_revenue: totalRevenue,
-    total_orders: totalOrders,
-    pending_orders: pendingOrders,
-    total_products: totalProducts,
-    total_messages: totalMessages,
-    unread_messages: unreadMessages,
-    read_messages: readMessages,
-    active_carts: activeCartsCount,
-    daily_stats: dailyStats
-  };
+    const [revenueAgg, totalOrders, pendingOrders, totalProducts, unreadMessages, activeCarts] = await Promise.all([
+      db.collection('orders').aggregate([
+        { $match: { status: { $ne: 'CANCELLED' }, payment_status: { $in: ['VERIFIED', 'verified'] } } },
+        { $group: { _id: null, total: { $sum: { $toDouble: '$total_amount' } } } },
+      ]).toArray(),
+      db.collection('orders').countDocuments(),
+      db.collection('orders').countDocuments({ status: { $in: ['PENDING', 'CONFIRMED', 'PROCESSING', 'pending', 'processing'] } }),
+      db.collection('products').countDocuments(),
+      db.collection('contactmessages').countDocuments({ is_read: false }),
+      db.collection('carts').countDocuments({ 'items.0': { $exists: true } }),
+    ]);
+
+    return {
+      total_revenue: revenueAgg[0]?.total || 0,
+      total_orders: totalOrders,
+      pending_orders: pendingOrders,
+      total_products: totalProducts,
+      unread_messages: unreadMessages,
+      active_carts: activeCarts,
+      daily_stats,
+    };
+  });
+}
+
+/** Things the owner should act on right now. */
+export async function getAdminAlerts() {
+  return run(async () => {
+    await requireAdmin();
+    const db = await getDb();
+    const settings = await getSettings();
+    const threshold = Number(settings.inventory.low_stock_threshold || 3);
+    const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+
+    const [toVerify, toShip, attention, failedEmails, unread, pendingReviews, products, recentDocs] = await Promise.all([
+      db.collection('orders').countDocuments({ payment_status: { $in: ['RECEIVED', 'received'] }, status: { $ne: 'CANCELLED' } }),
+      db.collection('orders').countDocuments({ status: { $in: ['CONFIRMED', 'PROCESSING'] } }),
+      db.collection('orders').countDocuments({ needs_attention: { $nin: [null, ''] , $exists: true } }),
+      db.collection('emaillogs').countDocuments({ status: 'FAILED', queued_at: { $gt: weekAgo } }),
+      db.collection('contactmessages').countDocuments({ is_read: false }),
+      db.collection('testimonials').countDocuments({ is_active: false, reviewed: { $ne: true } }),
+      db.collection('products').find({ is_active: true }, { projection: { name: 1, variants: 1, images: 1 } }).toArray(),
+      db.collection('orders').find().sort({ created_at: -1 }).limit(6).toArray(),
+    ]);
+
+    const lowStock = products
+      .map((p) => ({ id: p._id.toString(), name: p.name, stock: totalStockOf(p), image: primaryImageOf(p) }))
+      .filter((p) => p.stock <= threshold)
+      .sort((a, b) => a.stock - b.stock)
+      .slice(0, 8);
+
+    return {
+      payments_to_verify: toVerify,
+      orders_to_ship: toShip,
+      needs_attention: attention,
+      failed_emails: failedEmails,
+      unread_messages: unread,
+      pending_reviews: pendingReviews,
+      low_stock: lowStock,
+      low_stock_threshold: threshold,
+      recent_orders: await serializeOrders(db, recentDocs, { admin: true }),
+      integrations: {
+        smtp: isSmtpConfigured(),
+        upi_id: !!(settings.payments.upi_enabled && settings.payments.upi_id),
+        cod: !!settings.payments.cod_enabled,
+      },
+    };
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// ADMIN — orders
+// ══════════════════════════════════════════════════════════════════════
+
+export async function getAdminOrders(params = {}) {
+  return run(async () => {
+    await requireAdmin();
+    const db = await getDb();
+    const query = {};
+    const status = String(params.status || '').toUpperCase();
+    const paymentStatus = String(params.payment_status || '').toUpperCase();
+    const method = String(params.payment_method || '').toUpperCase();
+    if (ORDER_STATUSES.includes(status)) query.status = { $in: [status, status.toLowerCase()] };
+    if (PAYMENT_STATUSES.includes(paymentStatus)) query.payment_status = { $in: [paymentStatus, paymentStatus.toLowerCase()] };
+    if (['UPI', 'COD'].includes(method)) query.payment_method = method;
+    if (params.attention) query.needs_attention = { $nin: [null, ''], $exists: true };
+    if (params.search) {
+      const re = new RegExp(escapeRegExp(String(params.search).trim().slice(0, 80)), 'i');
+      query.$or = [
+        { order_number: re }, { _id: re }, { customer_name: re }, { customer_email: re },
+        { customer_phone: re }, { upi_transaction_id: re },
+      ];
+    }
+
+    const page = Math.max(1, Number(params.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(params.page_size) || 20));
+    const [total, docs] = await Promise.all([
+      db.collection('orders').countDocuments(query),
+      db.collection('orders').find(query).sort({ created_at: -1 }).skip((page - 1) * pageSize).limit(pageSize).toArray(),
+    ]);
+    return { results: await serializeOrders(db, docs, { admin: true }), total };
+  });
+}
+
+export async function getAdminOrder(id) {
+  return run(async () => {
+    await requireAdmin();
+    const db = await getDb();
+    const order = await loadOrder(id, { admin: true });
+    if (!order) fail('Order not found.');
+    const [emails, activity] = await Promise.all([
+      db.collection('emaillogs').find({ order_id: order.id }).sort({ queued_at: -1 }).limit(30).toArray(),
+      db.collection('activity_logs').find({ entity_type: 'order', entity_id: order.id }).sort({ created_at: -1 }).limit(30).toArray(),
+    ]);
+    return {
+      order,
+      emails: emails.map(serializeEmailLog),
+      activity: activity.map(serializeActivity),
+    };
+  });
+}
+
+export async function updateAdminOrderStatus(id, payload = {}) {
+  return run(async () => {
+    const admin = await requireAdmin();
+    return changeOrderStatus(id, payload.status, admin, {
+      tracking: payload.tracking || null,
+      cancel_reason: payload.cancel_reason,
+      note: payload.note,
+      notify: payload.notify !== false,
+    });
+  });
+}
+
+export async function updateAdminPaymentStatus(id, payload = {}) {
+  return run(async () => {
+    const admin = await requireAdmin();
+    return changePaymentStatus(id, payload.payment_status, admin, { note: payload.note, notify: payload.notify !== false });
+  });
+}
+
+export async function updateAdminOrderNote(id, adminNote = '') {
+  return run(async () => {
+    await requireAdmin();
+    const db = await getDb();
+    const note = cleanMultiline(adminNote, { max: 2000, label: 'Note' });
+    const res = await db.collection('orders').updateOne(getQueryById(id), { $set: { admin_note: note, updated_at: nowIso() } });
+    if (!res.matchedCount) fail('Order not found.');
+    return loadOrder(id, { admin: true });
+  });
+}
+
+export async function resolveAdminOrderAttention(id) {
+  return run(async () => {
+    const admin = await requireAdmin();
+    const db = await getDb();
+    await db.collection('orders').updateOne(getQueryById(id), { $set: { needs_attention: null } });
+    await logActivity({ action: 'order.attention_resolved', message: 'Attention flag cleared', entity_type: 'order', entity_id: id, actor: admin });
+    return loadOrder(id, { admin: true });
+  });
+}
+
+/** Orders are financial records — only cancelled ones can be deleted. */
+export async function deleteAdminOrder(id) {
+  return run(async () => {
+    const admin = await requireAdmin();
+    const db = await getDb();
+    const order = await db.collection('orders').findOne(getQueryById(id));
+    if (!order) fail('Order not found.');
+    if (String(order.status).toUpperCase() !== 'CANCELLED') fail('Cancel the order first. Only cancelled orders can be deleted.');
+    await db.collection('payments').deleteMany({ order_id: order._id.toString() });
+    await db.collection('orders').deleteOne({ _id: order._id });
+    await logActivity({ action: 'order.deleted', message: `Deleted cancelled order ${order.order_number || order._id}`, entity_type: 'order', entity_id: order._id, actor: admin });
+    return { success: true };
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// ADMIN — products & categories
+// ══════════════════════════════════════════════════════════════════════
+
+export async function getAdminProducts() {
+  return run(async () => {
+    await requireAdmin();
+    const db = await getDb();
+    const [products, categoryMap] = await Promise.all([
+      db.collection('products').find().sort({ created_at: -1 }).toArray(),
+      getCategoryMap(db),
+    ]);
+    return products.map((p) => serializeProduct(p, categoryMap));
+  });
+}
+
+export async function getAdminProduct(id) {
+  return run(async () => {
+    await requireAdmin();
+    const product = await getAnyProduct(id);
+    if (!product) fail('Product not found.');
+    return product;
+  });
+}
+
+export async function uploadAdminImage(formData) {
+  return run(async () => {
+    await requireAdmin();
+    const folder = ['products', 'categories', 'site', 'testimonials'].includes(formData?.get('folder')) ? formData.get('folder') : 'products';
+    try {
+      const url = await uploadImageFile(formData?.get('file'), folder);
+      return { url };
+    } catch (err) {
+      if (err instanceof UploadError) fail(err.message);
+      throw err;
+    }
+  });
+}
+
+function cleanImageList(list) {
+  if (!Array.isArray(list)) return [];
+  const urls = [];
+  for (const item of list) {
+    const url = String(item?.image_url || item || '').trim();
+    if (!url) continue;
+    if (!(url.startsWith('/api/media/') || url.startsWith('/images/') || url.startsWith('/media/') || /^https:\/\//.test(url))) {
+      fail('One of the product images has an invalid address. Please re-upload it.');
+    }
+    if (!urls.includes(url)) urls.push(url);
+  }
+  if (urls.length > 12) fail('A product can have at most 12 photos.');
+  return urls;
+}
+
+async function uniqueSlug(db, base, excludeId) {
+  const root = slugify(base) || 'product';
+  let candidate = root;
+  for (let i = 2; i < 50; i++) {
+    const clash = await db.collection('products').findOne({ slug: candidate }, { projection: { _id: 1 } });
+    if (!clash || (excludeId && clash._id.toString() === String(excludeId))) return candidate;
+    candidate = `${root}-${i}`;
+  }
+  return `${root}-${crypto.randomUUID().slice(0, 6)}`;
+}
+
+/** Create (id = null) or update a product with everything the editor sends. */
+export async function saveAdminProduct(id, data = {}) {
+  return run(async () => {
+    const admin = await requireAdmin();
+    const db = await getDb();
+    const existing = id ? await db.collection('products').findOne(getQueryById(id)) : null;
+    if (id && !existing) fail('Product not found.');
+
+    const name = cleanText(data.name, { max: 120, required: true, label: 'Product name' });
+    const categoryId = data.category_id ? String(data.category_id) : null;
+    if (categoryId) {
+      const cat = await db.collection('categories').findOne(getQueryById(categoryId), { projection: { _id: 1 } });
+      if (!cat) fail('Selected category does not exist.');
+    }
+
+    let videos;
+    try {
+      videos = normalizeVideoList(data.videos, { max: 6 });
+    } catch (err) {
+      fail(err.message);
+    }
+
+    const highlights = (Array.isArray(data.highlights) ? data.highlights : [])
+      .map((h) => cleanText(h, { max: 120, label: 'Highlight' }))
+      .filter(Boolean)
+      .slice(0, 8);
+
+    const imageUrls = cleanImageList(data.images);
+    const existingImages = existing?.images || [];
+    const images = imageUrls.map((url, idx) => ({
+      id: existingImages.find((img) => img.image_url === url)?.id || crypto.randomUUID(),
+      image_url: url,
+      is_primary: idx === 0,
+    }));
+
+    const stock = cleanNumber(data.stock ?? 0, { min: 0, max: 100000, integer: true, label: 'Stock' });
+    const existingVariant = existing?.variants?.[0];
+    const variants = [
+      {
+        id: existingVariant?.id || crypto.randomUUID(),
+        sku: cleanText(data.sku, { max: 60 }) || existingVariant?.sku || `SKU-${slugify(name).toUpperCase().slice(0, 20)}-${crypto.randomInt(1000, 9999)}`,
+        size: existingVariant?.size || '',
+        color: existingVariant?.color || '',
+        price_override: null,
+        stock,
+      },
+      ...(existing?.variants || []).slice(1),
+    ];
+
+    const now = nowIso();
+    const fields = {
+      name,
+      slug: await uniqueSlug(db, data.slug || name, existing?._id),
+      tagline: cleanText(data.tagline, { max: 160, label: 'Tagline' }),
+      description: cleanMultiline(data.description, { max: 5000, label: 'Description' }),
+      highlights,
+      base_price: cleanNumber(data.base_price, { min: 1, max: 1000000, label: 'Price' }),
+      discount: cleanNumber(data.discount || 0, { min: 0, max: 90, integer: true, label: 'Discount %' }),
+      category_id: categoryId,
+      images,
+      videos,
+      variants,
+      is_active: !!data.is_active,
+      is_featured: !!data.is_featured,
+      featured_order: cleanNumber(data.featured_order || 0, { min: 0, max: 999, integer: true, label: 'Featured order' }),
+      updated_at: now,
+    };
+
+    let productId;
+    if (existing) {
+      await db.collection('products').updateOne({ _id: existing._id }, { $set: fields });
+      productId = existing._id.toString();
+      const changes = [];
+      if (existing.is_active !== fields.is_active) changes.push(fields.is_active ? 'enabled' : 'disabled');
+      if (Number(existing.base_price) !== fields.base_price) changes.push(`price ₹${existing.base_price} → ₹${fields.base_price}`);
+      if (Number(existing.discount || 0) !== fields.discount) changes.push(`discount ${existing.discount || 0}% → ${fields.discount}%`);
+      if (totalStockOf(existing) !== stock) changes.push(`stock ${totalStockOf(existing)} → ${stock}`);
+      await logActivity({
+        action: 'product.updated',
+        message: `Updated "${name}"${changes.length ? ` (${changes.join(', ')})` : ''}`,
+        entity_type: 'product',
+        entity_id: productId,
+        actor: admin,
+      });
+    } else {
+      const res = await db.collection('products').insertOne({ ...fields, created_at: now });
+      productId = res.insertedId.toString();
+      await logActivity({ action: 'product.created', message: `Created "${name}" (₹${fields.base_price}, stock ${stock})`, entity_type: 'product', entity_id: productId, actor: admin });
+    }
+
+    invalidate('products');
+    return getAnyProduct(productId);
+  });
+}
+
+export async function setAdminProductFlags(id, flags = {}) {
+  return run(async () => {
+    const admin = await requireAdmin();
+    const db = await getDb();
+    const product = await db.collection('products').findOne(getQueryById(id));
+    if (!product) fail('Product not found.');
+    const set = { updated_at: nowIso() };
+    if (flags.is_active !== undefined) set.is_active = !!flags.is_active;
+    if (flags.is_featured !== undefined) set.is_featured = !!flags.is_featured;
+    if (flags.stock !== undefined) {
+      set['variants.0.stock'] = cleanNumber(flags.stock, { min: 0, max: 100000, integer: true, label: 'Stock' });
+    }
+    if (flags.featured_order !== undefined) {
+      set.featured_order = cleanNumber(flags.featured_order, { min: 0, max: 999, integer: true, label: 'Homepage position' });
+    }
+    await db.collection('products').updateOne({ _id: product._id }, { $set: set });
+    const parts = [];
+    if (set.is_active !== undefined) parts.push(set.is_active ? 'enabled' : 'disabled');
+    if (set.is_featured !== undefined) parts.push(set.is_featured ? 'featured on homepage' : 'removed from homepage');
+    if (set['variants.0.stock'] !== undefined) parts.push(`stock set to ${set['variants.0.stock']}`);
+    if (set.featured_order !== undefined) parts.push(`homepage position ${set.featured_order}`);
+    await logActivity({ action: 'product.updated', message: `"${product.name}" ${parts.join(', ')}`, entity_type: 'product', entity_id: id, actor: admin });
+    invalidate('products');
+    return getAnyProduct(id);
+  });
+}
+
+export async function deleteAdminProduct(id) {
+  return run(async () => {
+    const admin = await requireAdmin();
+    const db = await getDb();
+    const product = await db.collection('products').findOne(getQueryById(id));
+    if (!product) fail('Product not found.');
+    await db.collection('products').deleteOne({ _id: product._id });
+    await logActivity({ action: 'product.deleted', message: `Deleted "${product.name}"`, entity_type: 'product', entity_id: id, actor: admin });
+    invalidate('products');
+    return { success: true };
+  });
+}
+
+export async function saveAdminCategory(id, data = {}) {
+  return run(async () => {
+    const admin = await requireAdmin();
+    const db = await getDb();
+    const name = cleanText(data.name, { max: 60, required: true, label: 'Category name' });
+    const fields = {
+      name,
+      slug: slugify(data.slug || name),
+      description: cleanText(data.description, { max: 300, label: 'Description' }),
+      sort_order: cleanNumber(data.sort_order || 0, { min: 0, max: 999, integer: true, label: 'Order' }),
+      updated_at: nowIso(),
+    };
+    if (data.image_url !== undefined) {
+      const [url] = cleanImageList(data.image_url ? [data.image_url] : []);
+      fields.image_url = url || null;
+    }
+    const clash = await db.collection('categories').findOne({ slug: fields.slug });
+    if (clash && clash._id.toString() !== String(id || '')) fail('Another category already uses this name/slug.');
+
+    let catId = id;
+    if (id) {
+      const res = await db.collection('categories').updateOne(getQueryById(id), { $set: fields });
+      if (!res.matchedCount) fail('Category not found.');
+    } else {
+      catId = crypto.randomUUID();
+      await db.collection('categories').insertOne({ _id: catId, ...fields, created_at: fields.updated_at });
+    }
+    await logActivity({ action: id ? 'category.updated' : 'category.created', message: `${id ? 'Updated' : 'Created'} category "${name}"`, entity_type: 'category', entity_id: catId, actor: admin });
+    invalidate('categories', 'products');
+    return { id: String(catId), ...fields };
+  });
+}
+
+export async function deleteAdminCategory(id) {
+  return run(async () => {
+    const admin = await requireAdmin();
+    const db = await getDb();
+    const cat = await db.collection('categories').findOne(getQueryById(id));
+    if (!cat) fail('Category not found.');
+    const res = await db.collection('products').updateMany({ category_id: cat._id.toString() }, { $set: { category_id: null } });
+    await db.collection('categories').deleteOne({ _id: cat._id });
+    await logActivity({ action: 'category.deleted', message: `Deleted category "${cat.name}" (${res.modifiedCount} products now uncategorised)`, entity_type: 'category', entity_id: id, actor: admin });
+    invalidate('categories', 'products');
+    return { success: true };
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// ADMIN — testimonials (text + video reviews)
+// ══════════════════════════════════════════════════════════════════════
+
+export async function getAdminTestimonials() {
+  return run(async () => {
+    await requireAdmin();
+    const db = await getDb();
+    const rows = await db.collection('testimonials').find().sort({ created_at: -1 }).toArray();
+    return rows.map((t) => ({ ...serializeTestimonial(t), reviewed: !!t.reviewed }));
+  });
+}
+
+export async function saveAdminTestimonial(id, data = {}) {
+  return run(async () => {
+    const admin = await requireAdmin();
+    const db = await getDb();
+    const videoUrl = cleanText(data.video_url, { max: 300 });
+    const youtubeId = videoUrl ? getYouTubeId(videoUrl) : null;
+    if (videoUrl && !youtubeId) fail('Video must be a valid YouTube link (youtube.com/watch, youtu.be or youtube.com/shorts).');
+
+    const content = cleanMultiline(data.content, { max: 1000, label: 'Review text' });
+    if (!content && !youtubeId) fail('Add either review text or a YouTube video.');
+
+    const fields = {
+      author_name: cleanText(data.author_name, { max: 80, required: true, label: 'Customer name' }),
+      author_location: cleanText(data.author_location, { max: 80 }),
+      content,
+      rating: Math.min(5, Math.max(1, Math.round(Number(data.rating) || 5))),
+      video_url: videoUrl,
+      youtube_id: youtubeId,
+      is_short: youtubeId ? (data.is_short !== undefined ? !!data.is_short : isYouTubeShortUrl(videoUrl)) : false,
+      product_id: data.product_id ? String(data.product_id) : null,
+      is_active: !!data.is_active,
+      is_featured: !!data.is_featured,
+      reviewed: true,
+      updated_at: nowIso(),
+    };
+
+    let tid = id;
+    if (id) {
+      const res = await db.collection('testimonials').updateOne(getQueryById(id), { $set: fields });
+      if (!res.matchedCount) fail('Review not found.');
+    } else {
+      const res = await db.collection('testimonials').insertOne({ ...fields, source: 'admin', created_at: fields.updated_at });
+      tid = res.insertedId.toString();
+    }
+    await logActivity({ action: id ? 'testimonial.updated' : 'testimonial.created', message: `${id ? 'Updated' : 'Added'} review by ${fields.author_name}${fields.is_active ? '' : ' (hidden)'}`, entity_type: 'testimonial', entity_id: tid, actor: admin });
+    invalidate('testimonials');
+    const doc = await db.collection('testimonials').findOne(getQueryById(tid));
+    return serializeTestimonial(doc);
+  });
+}
+
+export async function setAdminTestimonialFlags(id, flags = {}) {
+  return run(async () => {
+    const admin = await requireAdmin();
+    const db = await getDb();
+    const set = { reviewed: true, updated_at: nowIso() };
+    if (flags.is_active !== undefined) set.is_active = !!flags.is_active;
+    if (flags.is_featured !== undefined) set.is_featured = !!flags.is_featured;
+    const res = await db.collection('testimonials').findOneAndUpdate(getQueryById(id), { $set: set }, { returnDocument: 'after' });
+    if (!res) fail('Review not found.');
+    await logActivity({ action: 'testimonial.updated', message: `Review by ${res.author_name} ${set.is_active === false ? 'hidden' : set.is_active ? 'approved' : 'updated'}`, entity_type: 'testimonial', entity_id: id, actor: admin });
+    invalidate('testimonials');
+    return serializeTestimonial(res);
+  });
+}
+
+export async function deleteAdminTestimonial(id) {
+  return run(async () => {
+    const admin = await requireAdmin();
+    const db = await getDb();
+    const doc = await db.collection('testimonials').findOne(getQueryById(id));
+    if (!doc) fail('Review not found.');
+    await db.collection('testimonials').deleteOne({ _id: doc._id });
+    await logActivity({ action: 'testimonial.deleted', message: `Deleted review by ${doc.author_name}`, entity_type: 'testimonial', entity_id: id, actor: admin });
+    invalidate('testimonials');
+    return { success: true };
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// ADMIN — messages, customers, carts
+// ══════════════════════════════════════════════════════════════════════
+
+export async function getAdminMessages() {
+  return run(async () => {
+    await requireAdmin();
+    const db = await getDb();
+    const rows = await db.collection('contactmessages').find().sort({ created_at: -1 }).limit(500).toArray();
+    return rows.map(({ _id, ...m }) => ({ ...m, id: _id.toString() }));
+  });
+}
+
+export async function updateAdminMessage(id, messageData = {}) {
+  return run(async () => {
+    await requireAdmin();
+    const db = await getDb();
+    await db.collection('contactmessages').updateOne(getQueryById(id), { $set: { is_read: !!messageData.is_read } });
+    return { id, is_read: !!messageData.is_read };
+  });
+}
+
+export async function deleteAdminMessage(id) {
+  return run(async () => {
+    const admin = await requireAdmin();
+    const db = await getDb();
+    await db.collection('contactmessages').deleteOne(getQueryById(id));
+    await logActivity({ action: 'message.deleted', message: 'Deleted a contact message', entity_type: 'message', entity_id: id, actor: admin });
+    return { success: true };
+  });
 }
 
 export async function getAdminUsers() {
-  const user = await getAuthenticatedUser();
-  if (!user || !user.is_superuser) throw new Error('Unauthorized');
-  
-  const db = await getDb();
-  const users = await db.collection('users').find().sort({ date_joined: -1 }).toArray();
-  return users.map(u => ({
-    id: u._id.toString(),
-    email: u.email,
-    username: u.username,
-    first_name: u.first_name || '',
-    last_name: u.last_name || '',
-    is_superuser: !!u.is_superuser,
-    is_active: !!u.is_active,
-    date_joined: u.date_joined,
-    last_login: u.last_login
-  }));
+  return run(async () => {
+    await requireAdmin();
+    const db = await getDb();
+    const [users, orderStats] = await Promise.all([
+      db.collection('users').find({}, { projection: { password: 0 } }).sort({ date_joined: -1 }).toArray(),
+      db.collection('orders').aggregate([
+        { $match: { status: { $ne: 'CANCELLED' } } },
+        { $group: { _id: '$user_id', orders: { $sum: 1 }, spent: { $sum: { $cond: [{ $eq: [{ $toUpper: '$payment_status' }, 'VERIFIED'] }, { $toDouble: '$total_amount' }, 0] } } } },
+      ]).toArray(),
+    ]);
+    const statsByUser = Object.fromEntries(orderStats.map((s) => [String(s._id), s]));
+    return users.map((u) => ({
+      id: u._id.toString(),
+      email: u.email,
+      first_name: u.first_name || '',
+      is_superuser: !!u.is_superuser,
+      is_active: !!u.is_active,
+      date_joined: u.date_joined,
+      last_login: u.last_login,
+      orders: statsByUser[u._id.toString()]?.orders || 0,
+      spent: statsByUser[u._id.toString()]?.spent || 0,
+    }));
+  });
+}
+
+export async function setAdminUserActive(id, isActive) {
+  return run(async () => {
+    const admin = await requireAdmin();
+    if (String(id) === admin.id) fail('You cannot disable your own account.');
+    const db = await getDb();
+    const user = await db.collection('users').findOne(getQueryById(id));
+    if (!user) fail('Customer not found.');
+    if (user.is_superuser) fail('Admin accounts cannot be disabled here.');
+    await db.collection('users').updateOne({ _id: user._id }, { $set: { is_active: !!isActive } });
+    await logActivity({ action: isActive ? 'customer.enabled' : 'customer.disabled', message: `${isActive ? 'Enabled' : 'Disabled'} account ${user.email}`, entity_type: 'user', entity_id: id, actor: admin });
+    return { success: true };
+  });
 }
 
 export async function getAdminCarts() {
-  const user = await getAuthenticatedUser();
-  if (!user || !user.is_superuser) throw new Error('Unauthorized');
-  
-  const db = await getDb();
-  const rawCarts = await db.collection('carts').find({ "items.0": { $exists: true } }).toArray();
-  
-  const populatedCarts = [];
-  for (const cart of rawCarts) {
-    const cartUser = await db.collection('users').findOne(getQueryById(cart.user_id));
-    if (!cartUser) continue;
-    
-    const mappedItems = [];
-    for (const item of cart.items || []) {
-      const p = await db.collection('products').findOne(getQueryById(item.product_id));
-      if (p) {
-        const variant = (p.variants || []).find(v => String(v.id) === String(item.variant_id)) || (p.variants || [])[0];
-        const originalPrice = variant ? (variant.price_override || p.base_price) : p.base_price;
-        const discount = p.discount || 0;
-        const effectivePrice = Math.round(originalPrice * (1 - discount / 100));
-        
-        mappedItems.push({
-          id: String(item.id || item.variant_id),
-          quantity: item.quantity,
-          price: Number(effectivePrice),
-          product_name: p.name,
-          variant_info: variant ? `${variant.size || ''} ${variant.color || ''}`.trim() : ''
-        });
-      }
-    }
-    
-    if (mappedItems.length > 0) {
-      populatedCarts.push({
-        id: cart._id.toString(),
-        user: {
-          id: cartUser._id.toString(),
-          email: cartUser.email,
-          full_name: cartUser.first_name || cartUser.username
-        },
-        items: mappedItems,
-        updated_at: cart.updated_at
+  return run(async () => {
+    await requireAdmin();
+    const db = await getDb();
+    const carts = await db.collection('carts').find({ 'items.0': { $exists: true } }).sort({ updated_at: -1 }).limit(100).toArray();
+    const result = [];
+    for (const cart of carts) {
+      const owner = await db.collection('users').findOne(getQueryById(cart.user_id), { projection: { email: 1, first_name: 1 } });
+      if (!owner) continue;
+      const built = await buildCart(db, cart);
+      if (!built.items.length) continue;
+      result.push({
+        id: built.id,
+        user: { id: owner._id.toString(), email: owner.email, full_name: owner.first_name || owner.email },
+        items: built.items,
+        total: built.items.reduce((s, i) => s + i.price * i.quantity, 0),
+        updated_at: cart.updated_at,
       });
     }
-  }
-  
-  return populatedCarts;
+    return result;
+  });
 }
 
-export async function getAdminEmailLogs() {
-  const user = await getAuthenticatedUser();
-  if (!user || !user.is_superuser) throw new Error('Unauthorized');
-  
-  const db = await getDb();
-  const logs = await db.collection('emaillogs').find().sort({ queued_at: -1 }).toArray();
-  return logs.map(log => ({
+// ══════════════════════════════════════════════════════════════════════
+// ADMIN — emails & activity
+// ══════════════════════════════════════════════════════════════════════
+
+function serializeEmailLog(log) {
+  return {
     id: log._id.toString(),
     email_type: log.email_type,
+    type_label: EMAIL_TYPES[log.email_type]?.label || log.email_type,
     status: log.status,
     subject: log.subject,
-    from_email: log.from_email,
     to_email: log.to_email,
-    body_text: log.body_text,
+    body_text: (log.body_text || '').slice(0, 600),
     backend: log.backend,
-    attachment_name: log.attachment_name,
-    attempts: log.attempts,
+    attachment_name: log.attachment_name || '',
+    attempts: log.attempts || 1,
     error_message: log.error_message || '',
     queued_at: log.queued_at,
     sent_at: log.sent_at,
     failed_at: log.failed_at,
-    user_id: log.user_id,
-    order_id: log.order_id
-  }));
-}
-
-export async function getAdminOrders(params = {}) {
-  const user = await getAuthenticatedUser();
-  if (!user || !user.is_superuser) throw new Error('Unauthorized');
-
-  return getOrders(null, params);
-}
-
-export async function deleteAdminOrder(id) {
-  const user = await getAuthenticatedUser();
-  if (!user || !user.is_superuser) throw new Error('Unauthorized');
-
-  const db = await getDb();
-  const order = await db.collection('orders').findOne(getQueryById(id));
-  if (!order) throw new Error('Order not found');
-
-  await db.collection('payments').deleteMany({ order_id: order._id.toString() });
-  await db.collection('orders').deleteOne(getQueryById(id));
-
-  return { success: true };
-}
-
-export async function getAdminOrder(id) {
-  const user = await getAuthenticatedUser();
-  if (!user || !user.is_superuser) throw new Error('Unauthorized');
-  
-  return getOrder(id);
-}
-
-export async function updateAdminOrder(id, payload) {
-  const user = await getAuthenticatedUser();
-  if (!user || !user.is_superuser) throw new Error('Unauthorized');
-  
-  const db = await getDb();
-  const oldOrder = await db.collection('orders').findOne(getQueryById(id));
-  if (!oldOrder) throw new Error('Order not found');
-  
-  const now = getFormattedDate();
-  const updates = {};
-  
-  const allowedFields = ['status', 'payment_status', 'shipping_address', 'city', 'state', 'pincode'];
-  allowedFields.forEach(f => {
-    if (payload[f] !== undefined) {
-      updates[f] = payload[f];
-    }
-  });
-  
-  // Status transitions
-  if (payload.status && payload.status !== oldOrder.status) {
-    if (payload.status === 'PROCESSING') updates.processing_at = now;
-    else if (payload.status === 'SHIPPED') updates.shipped_at = now;
-    else if (payload.status === 'DELIVERED') updates.delivered_at = now;
-    else if (payload.status === 'CANCELLED') updates.cancelled_at = now;
-  }
-  
-  if (payload.payment_status && payload.payment_status !== oldOrder.payment_status) {
-    if (payload.payment_status === 'VERIFIED') {
-      updates.payment_verified_at = now;
-    }
-  }
-  
-  updates.updated_at = now;
-  
-  await db.collection('orders').updateOne(getQueryById(id), { $set: updates });
-  
-  // Trigger email alerts in the background
-  const mailOrderData = {
-    id: id.toString(),
-    customer_name: oldOrder.customer_name || 'Customer',
-    customer_email: oldOrder.customer_email || 'customer@example.com',
-    user_id: oldOrder.user_id,
-    status: payload.status || oldOrder.status,
-    payment_status: payload.payment_status || oldOrder.payment_status
+    order_id: log.order_id,
   };
-
-  if (payload.status && payload.status !== oldOrder.status) {
-    sendOrderStatusEmail(mailOrderData)
-      .catch(err => console.error('Background Order Status Email failed:', err));
-  }
-  
-  if (payload.payment_status && payload.payment_status !== oldOrder.payment_status) {
-    sendPaymentStatusEmail(mailOrderData)
-      .catch(err => console.error('Background Payment Status Email failed:', err));
-  }
-  
-  return getOrder(id);
 }
 
-export async function getAdminProducts() {
-  const user = await getAuthenticatedUser();
-  if (!user || !user.is_superuser) throw new Error('Unauthorized');
-  
-  const db = await getDb();
-  const products = await db.collection('products').find().sort({ created_at: -1 }).toArray();
-  
-  const results = [];
-  for (const p of products) {
-    const cat = await db.collection('categories').findOne(getQueryById(p.category_id));
-    const totalStock = (p.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
-    const primaryImageObj = (p.images || []).find(img => img.is_primary) || (p.images || [])[0] || null;
-    const primary_image = primaryImageObj ? primaryImageObj.image_url : null;
-    
-    results.push({
-      id: p._id.toString(),
-      name: p.name,
-      slug: p.slug,
-      description: p.description,
-      base_price: String(p.base_price),
-      price_value: Number(p.base_price),
-      discount: Number(p.discount || 0),
-      is_active: !!p.is_active,
-      created_at: p.created_at,
-      updated_at: p.updated_at,
-      stock: totalStock,
-      category: cat ? {
-        id: cat._id.toString(),
-        name: cat.name,
-        slug: cat.slug
-      } : null,
-      category_id: p.category_id,
-      primary_image,
-      image_url: primary_image,
-      gallery_images: (p.images || []).map(img => img.image_url),
-      images: (p.images || []).map(img => ({
-        id: String(img.id),
-        image_url: img.image_url,
-        is_primary: !!img.is_primary
-      })),
-      variants: (p.variants || []).map(v => ({
-        id: String(v.id),
-        sku: v.sku,
-        size: v.size,
-        color: v.color,
-        price_override: v.price_override ? String(v.price_override) : null,
-        stock: v.stock
-      }))
-    });
-  }
-  
-  return results;
-}
-
-export async function createAdminProduct(productData) {
-  const user = await getAuthenticatedUser();
-  if (!user || !user.is_superuser) throw new Error('Unauthorized');
-  
-  const db = await getDb();
-  const now = getFormattedDate();
-  
-  let p = productData;
-  let uploadedImage = null;
-  
-  if (productData instanceof FormData) {
-    p = {
-      name: productData.get('name'),
-      slug: productData.get('slug'),
-      description: productData.get('description'),
-      base_price: Number(productData.get('base_price') || productData.get('price') || 0),
-      discount: Number(productData.get('discount') || 0),
-      is_active: productData.get('is_active') === 'true',
-      category_id: String(productData.get('category_id')),
-      variants: JSON.parse(productData.get('variants') || '[]'),
-      images: JSON.parse(productData.get('images') || '[]')
-    };
-    
-    // Handle file upload if present
-    const imageFile = productData.get('image');
-    if (imageFile && typeof imageFile === 'object' && imageFile.name) {
-      try {
-        const bytes = await imageFile.arrayBuffer();
-        const buffer = Buffer.from(bytes);
-        const ext = path.extname(imageFile.name) || '.jpeg';
-        const filename = `products/${crypto.randomUUID()}${ext}`;
-        const imageUrl = await uploadFile(buffer, filename, imageFile.type || 'image/jpeg');
-        uploadedImage = {
-          id: crypto.randomUUID(),
-          image_url: imageUrl,
-          is_primary: true
-        };
-      } catch (err) {
-        console.error('Failed to upload product image:', err);
-      }
-    }
-  }
-  
-  const productImages = [];
-  if (uploadedImage) {
-    productImages.push(uploadedImage);
-  }
-  const incomingImages = p.images || [];
-  incomingImages.forEach((img, idx) => {
-    productImages.push({
-      id: img.id || crypto.randomUUID(),
-      image_url: img.image_url || img,
-      is_primary: productImages.length === 0 && idx === 0
-    });
-  });
-
-  const variantsToSave = (p.variants && p.variants.length > 0) ? p.variants : [{
-    sku: `SKU-${(p.slug || p.name || '').toUpperCase().replace(/[^A-Z0-9]+/g, '-')}-${Math.floor(1000 + Math.random() * 9000)}`,
-    stock: 20
-  }];
-  
-  const newProduct = {
-    name: p.name,
-    slug: p.slug || p.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-    description: p.description || '',
-    base_price: Number(p.base_price || 0),
-    discount: Number(p.discount || 0),
-    is_active: p.is_active ? true : false,
-    created_at: now,
-    updated_at: now,
-    category_id: String(p.category_id || p.category?.id || '1'),
-    images: productImages,
-    variants: variantsToSave.map(v => ({
-      id: crypto.randomUUID(),
-      sku: v.sku || `SKU-${Math.floor(Math.random() * 100000)}`,
-      size: v.size || '',
-      color: v.color || '',
-      price_override: v.price_override ? Number(v.price_override) : null,
-      stock: Number(v.stock || 0)
-    }))
+function serializeActivity(a) {
+  return {
+    id: a._id.toString(),
+    action: a.action,
+    message: a.message,
+    entity_type: a.entity_type,
+    entity_id: a.entity_id,
+    actor: a.actor || { type: 'system' },
+    created_at: a.created_at,
   };
-  
-  const result = await db.collection('products').insertOne(newProduct);
-  revalidateTag('products');
-  return getProduct(result.insertedId.toString());
 }
 
-export async function updateAdminProduct(id, productData) {
-  const user = await getAuthenticatedUser();
-  if (!user || !user.is_superuser) throw new Error('Unauthorized');
-  
-  const db = await getDb();
-  const now = getFormattedDate();
-  
-  let p = productData;
-  let uploadedImage = null;
-  
-  if (productData instanceof FormData) {
-    const rawBasePrice = productData.get('base_price') !== null ? productData.get('base_price') : productData.get('price');
-    const base_price = (rawBasePrice !== null && rawBasePrice !== '') ? Number(rawBasePrice) : undefined;
-    
-    p = {
-      name: productData.get('name') || undefined,
-      slug: productData.get('slug') || undefined,
-      description: productData.get('description') || undefined,
-      base_price: base_price,
-      discount: productData.get('discount') !== null ? Number(productData.get('discount')) : undefined,
-      is_active: productData.get('is_active') !== null ? productData.get('is_active') === 'true' : undefined,
-      category_id: productData.get('category_id') !== null ? String(productData.get('category_id')) : undefined,
-      variants: productData.get('variants') ? JSON.parse(productData.get('variants')) : undefined,
-      images: productData.get('images') ? JSON.parse(productData.get('images')) : undefined
-    };
-    
-    // Handle file upload if present
-    const imageFile = productData.get('image');
-    if (imageFile && typeof imageFile === 'object' && imageFile.name) {
-      try {
-        const bytes = await imageFile.arrayBuffer();
-        const buffer = Buffer.from(bytes);
-        const ext = path.extname(imageFile.name) || '.jpeg';
-        const filename = `products/${crypto.randomUUID()}${ext}`;
-        const imageUrl = await uploadFile(buffer, filename, imageFile.type || 'image/jpeg');
-        uploadedImage = {
-          id: crypto.randomUUID(),
-          image_url: imageUrl,
-          is_primary: true
-        };
-      } catch (err) {
-        console.error('Failed to upload product image:', err);
-      }
+export async function getAdminEmailLogs(params = {}) {
+  return run(async () => {
+    await requireAdmin();
+    const db = await getDb();
+    const query = {};
+    if (params.status) query.status = String(params.status).toUpperCase();
+    if (params.type && EMAIL_TYPES[params.type]) query.email_type = params.type;
+    if (params.search) {
+      const re = new RegExp(escapeRegExp(String(params.search).slice(0, 80)), 'i');
+      query.$or = [{ to_email: re }, { subject: re }];
     }
-  }
-  
-  const updates = {};
-  const allowedFields = ['name', 'slug', 'description', 'base_price', 'discount', 'is_active', 'category_id'];
-  allowedFields.forEach(f => {
-    if (p[f] !== undefined) updates[f] = p[f];
+    const page = Math.max(1, Number(params.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(params.page_size) || 25));
+    const [total, rows, counts] = await Promise.all([
+      db.collection('emaillogs').countDocuments(query),
+      db.collection('emaillogs').find(query, { projection: { body_html: 0, attachment_data: 0 } }).sort({ queued_at: -1 }).skip((page - 1) * pageSize).limit(pageSize).toArray(),
+      db.collection('emaillogs').aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]).toArray(),
+    ]);
+    return {
+      results: rows.map(serializeEmailLog),
+      total,
+      counts: Object.fromEntries(counts.map((c) => [c._id, c.count])),
+      smtp_configured: isSmtpConfigured(),
+      types: Object.entries(EMAIL_TYPES).map(([key, v]) => ({ key, label: v.label })),
+    };
   });
-  
-  if (p.category_id === undefined && p.category?.id !== undefined) {
-    updates.category_id = String(p.category.id);
+}
+
+export async function resendAdminEmail(id) {
+  return run(async () => {
+    const admin = await requireAdmin();
+    const db = await getDb();
+    const log = await db.collection('emaillogs').findOne(getQueryById(id));
+    if (!log) fail('Email not found.');
+    let attachments = [];
+    if (log.email_type === 'ORDER_CONFIRMATION' && log.order_id) {
+      const order = await loadOrder(log.order_id);
+      if (order) attachments = await buildInvoiceAttachment(order);
+    }
+    try {
+      const status = await resendLoggedEmail(log, { attachments });
+      await logActivity({ action: 'email.resent', message: `Resent "${log.subject}" to ${log.to_email}`, entity_type: 'order', entity_id: log.order_id, actor: admin });
+      return { status };
+    } catch (err) {
+      fail(err.message);
+    }
+  });
+}
+
+export async function sendAdminTestEmail(to) {
+  return run(async () => {
+    const admin = await requireAdmin();
+    const email = cleanEmail(to || admin.email);
+    const id = await deliverEmail({
+      type: 'TEST',
+      to: email,
+      subject: 'Test email from your store',
+      html: `<p>If you can read this, email sending is working. 🎉</p><p>${SITE_URL}</p>`,
+      force: true,
+    });
+    const db = await getDb();
+    const log = id ? await db.collection('emaillogs').findOne({ _id: id }) : null;
+    return { status: log?.status || 'UNKNOWN', error: log?.error_message || '' };
+  });
+}
+
+export async function getAdminActivity(params = {}) {
+  return run(async () => {
+    await requireAdmin();
+    const db = await getDb();
+    const query = {};
+    if (params.entity_type) query.entity_type = String(params.entity_type);
+    const page = Math.max(1, Number(params.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(params.page_size) || 30));
+    const [total, rows] = await Promise.all([
+      db.collection('activity_logs').countDocuments(query),
+      db.collection('activity_logs').find(query).sort({ created_at: -1 }).skip((page - 1) * pageSize).limit(pageSize).toArray(),
+    ]);
+    return { results: rows.map(serializeActivity), total };
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// ADMIN — settings
+// ══════════════════════════════════════════════════════════════════════
+
+export async function getAdminSettings() {
+  return run(async () => {
+    await requireAdmin();
+    return {
+      settings: await getSettings(),
+      integrations: {
+        smtp: isSmtpConfigured(),
+        blob: !!process.env.BLOB_READ_WRITE_TOKEN,
+        site_url: SITE_URL,
+      },
+      email_types: Object.entries(EMAIL_TYPES).map(([key, v]) => ({ key, ...v })),
+    };
+  });
+}
+
+function sanitizeSection(section, values) {
+  const v = values || {};
+  const bool = (x) => !!x;
+  switch (section) {
+    case 'store':
+      return {
+        name: cleanText(v.name, { max: 80, required: true, label: 'Store name' }),
+        tagline: cleanText(v.tagline, { max: 300 }),
+        email: cleanEmail(v.email),
+        phone: cleanText(v.phone, { max: 30 }),
+        whatsapp: String(v.whatsapp || '').replace(/\D/g, '').slice(0, 15),
+        location: cleanText(v.location, { max: 120 }),
+        instagram: /^https?:\/\//.test(v.instagram || '') ? cleanText(v.instagram, { max: 200 }) : '',
+        youtube: /^https?:\/\//.test(v.youtube || '') ? cleanText(v.youtube, { max: 200 }) : '',
+        gstin: cleanText(v.gstin, { max: 20 }).toUpperCase(),
+      };
+    case 'home': {
+      let brandVideos;
+      try {
+        brandVideos = normalizeVideoList(v.brand_videos, { max: 8 });
+      } catch (err) {
+        fail(err.message);
+      }
+      const heroVideoUrl = cleanText(v.hero_video_url, { max: 300 });
+      const heroVideoId = heroVideoUrl ? getYouTubeId(heroVideoUrl) : '';
+      if (heroVideoUrl && !heroVideoId) fail('Hero video must be a valid YouTube link.');
+      return {
+        hero_badge: cleanText(v.hero_badge, { max: 60 }),
+        hero_title: cleanText(v.hero_title, { max: 80, required: true, label: 'Hero title' }),
+        hero_subtitle: cleanText(v.hero_subtitle, { max: 300 }),
+        hero_cta_label: cleanText(v.hero_cta_label, { max: 30 }) || 'Shop now',
+        hero_video_url: heroVideoUrl,
+        hero_video_id: heroVideoId || '',
+        announcement: cleanText(v.announcement, { max: 140 }),
+        story_title: cleanText(v.story_title, { max: 80 }),
+        story_subtitle: cleanText(v.story_subtitle, { max: 200 }),
+        brand_videos: brandVideos,
+        show_categories: bool(v.show_categories),
+        show_new_arrivals: bool(v.show_new_arrivals),
+      };
+    }
+    case 'shipping':
+      return {
+        flat_fee: cleanNumber(v.flat_fee || 0, { min: 0, max: 5000, integer: true, label: 'Shipping fee' }),
+        free_shipping_threshold: cleanNumber(v.free_shipping_threshold || 0, { min: 0, max: 1000000, integer: true, label: 'Free shipping above' }),
+        estimated_delivery: cleanText(v.estimated_delivery, { max: 60 }),
+      };
+    case 'payments': {
+      const upiId = String(v.upi_id || '').trim();
+      if (upiId && !/^[a-zA-Z0-9._-]{2,256}@[a-zA-Z]{2,64}$/.test(upiId)) fail('UPI ID looks invalid (example: yourname@okaxis).');
+      const out = {
+        upi_enabled: bool(v.upi_enabled),
+        upi_id: upiId,
+        upi_payee_name: cleanText(v.upi_payee_name, { max: 60 }),
+        cod_enabled: bool(v.cod_enabled),
+        cod_fee: cleanNumber(v.cod_fee || 0, { min: 0, max: 1000, integer: true, label: 'COD fee' }),
+      };
+      if (out.upi_enabled && !out.upi_id) fail('Enter your UPI ID to enable UPI payments.');
+      if (!out.upi_enabled && !out.cod_enabled) fail('Keep at least one payment method (UPI or cash on delivery) enabled.');
+      return out;
+    }
+    case 'notifications': {
+      const out = {};
+      for (const key of Object.keys(DEFAULT_SETTINGS.notifications)) {
+        if (key !== 'admin_recipients') out[key] = bool(v[key]);
+      }
+      const recipients = (Array.isArray(v.admin_recipients) ? v.admin_recipients : String(v.admin_recipients || '').split(/[,\n]/))
+        .map((e) => String(e).trim())
+        .filter(Boolean)
+        .slice(0, 5)
+        .map((e) => cleanEmail(e));
+      out.admin_recipients = recipients;
+      return out;
+    }
+    case 'reviews':
+      return { auto_approve: bool(v.auto_approve) };
+    case 'inventory':
+      return { low_stock_threshold: cleanNumber(v.low_stock_threshold || 0, { min: 0, max: 1000, integer: true, label: 'Low stock threshold' }) };
+    default:
+      fail('Unknown settings section.');
   }
-  
-  updates.updated_at = now;
-  
-  if (p.variants) {
-    const finalVariants = p.variants.length > 0 ? p.variants : [{
-      sku: `SKU-${(updates.slug || id).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`,
-      stock: 20
-    }];
-    updates.variants = finalVariants.map(v => ({
-      id: v.id || crypto.randomUUID(),
-      sku: v.sku,
-      size: v.size || '',
-      color: v.color || '',
-      price_override: v.price_override ? Number(v.price_override) : null,
-      stock: Number(v.stock || 0)
-    }));
-  }
-  
-  if (uploadedImage) {
-    const existing = await db.collection('products').findOne(getQueryById(id));
-    const currentImages = existing?.images || [];
-    updates.images = [
-      uploadedImage,
-      ...currentImages.map(img => ({ ...img, is_primary: false }))
-    ];
-  } else if (p.images) {
-    updates.images = p.images.map((img, idx) => ({
-      id: img.id || crypto.randomUUID(),
-      image_url: img.image_url || img,
-      is_primary: idx === 0
-    }));
-  }
-  
-  await db.collection('products').updateOne(getQueryById(id), { $set: updates });
-  revalidateTag('products');
-  return getProduct(id);
 }
 
-export async function deleteAdminProduct(id) {
-  const user = await getAuthenticatedUser();
-  if (!user || !user.is_superuser) throw new Error('Unauthorized');
-
-  const db = await getDb();
-  await db.collection('products').deleteOne(getQueryById(id));
-  revalidateTag('products');
-  return { success: true };
-}
-
-export async function getAdminMessages() {
-  const user = await getAuthenticatedUser();
-  if (!user || !user.is_superuser) throw new Error('Unauthorized');
-  
-  const db = await getDb();
-  const messages = await db.collection('contactmessages').find().sort({ created_at: -1 }).toArray();
-  return messages.map(({ _id, ...m }) => ({
-    ...m,
-    id: _id.toString()
-  }));
-}
-
-export async function updateAdminMessage(id, messageData) {
-  const user = await getAuthenticatedUser();
-  if (!user || !user.is_superuser) throw new Error('Unauthorized');
-  
-  const db = await getDb();
-  const is_read = !!messageData.is_read;
-  await db.collection('contactmessages').updateOne(getQueryById(id), { $set: { is_read } });
-  
-  return { id, ...messageData };
-}
-
-export async function deleteAdminMessage(id) {
-  const user = await getAuthenticatedUser();
-  if (!user || !user.is_superuser) throw new Error('Unauthorized');
-  
-  const db = await getDb();
-  await db.collection('contactmessages').deleteOne(getQueryById(id));
-  return { success: true };
+export async function saveAdminSettings(section, values) {
+  return run(async () => {
+    const admin = await requireAdmin();
+    const clean = sanitizeSection(section, values);
+    await saveSettingsSection(section, clean, admin);
+    await logActivity({ action: 'settings.updated', message: `Updated ${section} settings`, entity_type: 'settings', entity_id: section, actor: admin });
+    invalidate('settings');
+    return { ...(await getSettings()), [section]: clean };
+  });
 }

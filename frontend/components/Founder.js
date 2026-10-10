@@ -1,12 +1,17 @@
+"use client";
+
 import React from 'react';
 import Image from 'next/image';
 import siteData from '../data/siteData.json';
+import { useSettings } from '../context/SettingsContext';
 
 const Founder = () => {
-    const { founder, brand } = siteData;
+    const { founder } = siteData;
+    const { settings } = useSettings();
+    const brand = settings.store || siteData.brand;
 
     return (
-        <section id="founder" className="w-full py-16 md:py-24 border-t border-orange-100 bg-orange-50/30 rounded-[60px] my-12 overflow-hidden">
+        <section id="founder" className="w-full py-16 md:py-24 border-t border-orange-100 bg-orange-50/30 rounded-[40px] md:rounded-[60px] my-12 overflow-hidden">
             <div className="max-w-6xl mx-auto px-4 md:px-8 grid grid-cols-1 md:grid-cols-2 gap-12 md:gap-20 items-center">
                 {/* Left Side: Founder Image */}
                 <div className="relative group">
@@ -32,7 +37,7 @@ const Founder = () => {
                             {founder.name.split(' ')[0]} <br /> <span className="text-blue-600">{founder.name.split(' ')[1]}.</span>
                         </h2>
                         <p className="text-xl text-slate-700 font-bold leading-relaxed italic">
-                            "{founder.quote}"
+                            &ldquo;{founder.quote}&rdquo;
                         </p>
                     </div>
 
@@ -60,7 +65,7 @@ const Founder = () => {
                                     <div className="w-8 h-8 rounded-full bg-pink-100 flex items-center justify-center">
                                         <svg className="w-4 h-4 text-pink-600" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 1.366.062 2.633.344 3.608 1.319.975.975 1.257 2.242 1.319 3.608.058 1.266.07 1.646.07 4.85s-.012 3.584-.07 4.85c-.062 1.366-.344 2.633-1.319 3.608-.975.975-2.242 1.257-3.608 1.319-1.266.058-1.646.07-4.85.07s-3.584-.012-4.85-.07c-1.366-.062-2.633-.344-3.608-1.319-.975-.975-1.257-2.242-1.319-3.608-.058-1.266-.07-1.646-.07-4.85s.012-3.584.07-4.85c.062-1.366.344-2.633 1.319-3.608.975-.975 2.242-1.257 3.608-1.319 1.266-.058 1.646-.07 4.85-.07m0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.28-.073 1.689-.073 4.948s.014 3.667.072 4.947c.2 4.358 2.618 6.78 6.98 6.98 1.28.059 1.689.073 4.948.073s3.667-.014 4.947-.072c4.358-.2 6.78-2.618 6.98-6.98.059-1.28.073-1.689.073-4.948s-.014-3.667-.072-4.947c-.2-4.358-2.618-6.78-6.98-6.98-1.28-.059-1.689-.073-4.948-.073zM12 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm3.98-10.169a1.44 1.44 0 100-2.881 1.44 1.44 0 000 2.881z" /></svg>
                                     </div>
-                                    @craftyyy111
+                                    @{brand.instagram.replace(/\/$/, '').split('/').pop()}
                                 </a>
                             )}
                             <div className="flex items-center gap-3 text-slate-600 font-bold">

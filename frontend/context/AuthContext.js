@@ -1,197 +1,108 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { getMe, login as apiLogin, register as apiRegister, logout as apiLogout } from '../lib/api';
-import { useRouter, usePathname } from 'next/navigation';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import {
+  getMe,
+  login as apiLogin,
+  register as apiRegister,
+  logout as apiLogout,
+  updateProfile as apiUpdateProfile,
+} from '../lib/api';
 
 const AuthContext = createContext();
 
+/**
+ * The session lives only in an httpOnly cookie set by the server — it is
+ * never readable from JavaScript, so an XSS bug can't steal it. We just ask
+ * the server "who am I?" on load.
+ */
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [token, setToken] = useState(null);
   const [error, setError] = useState(null);
-  
-  // Use router carefully in app router
-  let router;
-  try {
-    router = useRouter();
-  } catch (e) {
-    // Handling case where AuthContext might be used where useRouter is unavailable
-  }
+  const router = useRouter();
 
-  const loadingRef = useRef(false);
-
-  const loadUser = useCallback(async () => {
-    const tokenSnapshot =
-      typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
-
-    if (!tokenSnapshot) {
-      setUser(null);
-      setToken(null);
-      setLoading(false);
-      return;
-    }
-
-    loadingRef.current = true;
-    setLoading(true);
-    setError(null);
+  const refreshUser = useCallback(async () => {
     try {
-      const userData = await getMe();
-      const tokenAfterRequest =
-        typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
-      if (tokenAfterRequest !== tokenSnapshot) {
-        console.warn('Discarding /me result: auth token changed during the request.');
-        return;
-      }
-      setUser(userData);
-      localStorage.setItem('user_data', JSON.stringify(userData));
-      console.log('User loaded successfully:', userData);
-    } catch (error) {
-      const isAuthError =
-        error.status === 401 ||
-        (error.response && error.response.status === 401) ||
-        error.message.includes('401') ||
-        error.message.toLowerCase().includes('token not valid') ||
-        error.message.toLowerCase().includes('credentials') ||
-        error.message.toLowerCase().includes('given token not valid') ||
-        error.message.includes('API error 401');
-
-      if (isAuthError) {
-        const currentToken =
-          typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
-        if (currentToken === tokenSnapshot) {
-          console.warn('Authentication session expired or invalid. Clearing session.');
-          localStorage.removeItem('auth_token');
-          localStorage.removeItem('user_data');
-          setToken(null);
-          setUser(null);
-        } else {
-          console.warn(
-            'Stale /me failure ignored: auth token changed while the request was in flight.',
-          );
-        }
-      } else {
-        console.error('Failed to load user:', error);
-      }
+      const me = await getMe();
+      setUser(me || null);
+      return me;
+    } catch {
+      setUser(null);
+      return null;
     } finally {
       setLoading(false);
-      loadingRef.current = false;
     }
   }, []);
 
   useEffect(() => {
-    const storedToken = localStorage.getItem('auth_token');
-    console.log('AuthContext mounted, token:', storedToken ? 'exists' : 'none');
-
-    if (storedToken) {
-      setToken(storedToken);
-      loadUser();
-    } else {
-      setLoading(false);
-    }
-  }, [loadUser]);
-
+    // Clean up tokens stored by older versions of the site.
+    try {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('user_data');
+    } catch {}
+    refreshUser();
+  }, [refreshUser]);
 
   const login = async (email, password) => {
+    setError(null);
     try {
-      const response = await apiLogin(email, password);
-      const accessToken = response.access_token || response.key || response.access;
-      
-      if (!accessToken) {
-        throw new Error('No access token received from login');
-      }
-
-      localStorage.setItem('auth_token', accessToken);
-      setToken(accessToken);
-      console.log('Token stored:', accessToken);
-
-      await loadUser();
-
-      return { success: true };
-    } catch (error) {
-      setError(error.message || 'Login failed');
-      return { success: false, error: error.message };
+      const { user: loggedIn } = await apiLogin(email, password);
+      setUser(loggedIn);
+      return { success: true, user: loggedIn };
+    } catch (err) {
+      setError(err.message);
+      return { success: false, error: err.message };
     }
   };
 
   const register = async (data) => {
+    setError(null);
     try {
-      const registerPayload = {
+      const { user: created } = await apiRegister({
         email: data.email,
         password: data.password,
         full_name: data.full_name,
-      };
-
-      await apiRegister(registerPayload);
-
-      console.log('Auto login after registration');
-      const loginResult = await login(data.email, data.password);
-
-      return loginResult;
-    } catch (error) {
-      let errorMessage = error.message || "Registration failed";
-      if (error.response && error.response.data) {
-        const errors = error.response.data;
-        errorMessage = "";
-        Object.keys(errors).forEach(key => {
-          const messages = Array.isArray(errors[key]) ? errors[key].join(" ") : errors[key];
-          errorMessage += `${key}: ${messages}\n`;
-        });
-        errorMessage = errorMessage.trim();
-      }
-      setError(errorMessage);
-      return { success: false, error: errorMessage };
+      });
+      setUser(created);
+      return { success: true, user: created };
+    } catch (err) {
+      setError(err.message);
+      return { success: false, error: err.message };
     }
   };
 
   const logout = async () => {
     try {
       await apiLogout();
-    } catch (error) {
-      console.error('Logout error:', error);
+    } catch (err) {
+      console.error('Logout error:', err);
     } finally {
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('user_data');
-      setToken(null);
       setUser(null);
-      if (router) {
-         router.push('/');
-      } else {
-         window.location.href = '/';
-      }
-      console.log('Logged out');
+      router.push('/');
+      router.refresh();
     }
   };
-
-  const setAuthFromToken = useCallback(async (accessToken) => {
-    localStorage.setItem('auth_token', accessToken);
-    setToken(accessToken);
-    await loadUser();
-  }, [loadUser]);
 
   const updateUserProfile = async (data) => {
     try {
-      const { updateProfile: apiUpdateProfile } = await import('../lib/api');
-      await apiUpdateProfile(data);
-      await loadUser();
+      const updated = await apiUpdateProfile(data);
+      setUser((prev) => ({ ...(prev || {}), ...updated }));
       return { success: true };
-    } catch (error) {
-      console.error('Failed to update user profile:', error);
-      return { success: false, error: error.message };
+    } catch (err) {
+      return { success: false, error: err.message };
     }
   };
 
-
   const value = {
     user,
-    token,
     loading,
     error,
     login,
     register,
     logout,
-    setAuthFromToken,
+    refreshUser,
     updateUserProfile,
     isAuthenticated: !!user,
   };
@@ -201,8 +112,6 @@ export function AuthProvider({ children }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 }

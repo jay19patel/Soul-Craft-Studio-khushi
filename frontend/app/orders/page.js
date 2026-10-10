@@ -1,312 +1,114 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { Package, ChevronRight, Loader2, ShoppingBag } from 'lucide-react';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
-import Link from 'next/link';
+import { StatusBadge, PaymentBadge } from '../../components/OrderStatusBadges';
 import { useAuth } from '../../context/AuthContext';
-import { getOrders } from '../../lib/api';
-import { getPaginationRange } from '../../lib/pagination';
-import { useRouter } from 'next/navigation';
-import {
-  Package, Truck, CheckCircle, Clock, ChevronRight, ChevronLeft,
-  ShoppingBag, Search, X, AlertCircle, Loader2
-} from 'lucide-react';
+import { getMyOrders } from '../../lib/api';
 
-const ORDERS_PAGE_SIZE = 10;
+const PAGE_SIZE = 10;
 
-// ── Status helpers ─────────────────────────────────────────────────────────
-const STATUS_CONFIG = {
-  pending:             { icon: Clock,        color: 'bg-orange-50 text-orange-600 border-orange-100',  label: 'Pending' },
-  processing:          { icon: Clock,        color: 'bg-yellow-50 text-yellow-600 border-yellow-100',  label: 'Processing' },
-  shipped:             { icon: Truck,        color: 'bg-blue-50 text-blue-600 border-blue-100',        label: 'Shipped' },
-  delivered:           { icon: CheckCircle,  color: 'bg-green-50 text-green-600 border-green-100',     label: 'Delivered' },
-  cancelled:           { icon: X,            color: 'bg-red-50 text-red-500 border-red-100',           label: 'Cancelled' },
-};
-
-function StatusBadge({ status }) {
-  const cfg = STATUS_CONFIG[status?.toLowerCase()] ?? STATUS_CONFIG.pending;
-  const Icon = cfg.icon;
-  return (
-    <div className={`px-4 py-2 rounded-full border flex items-center gap-2 ${cfg.color}`}>
-      <Icon className="w-4 h-4" />
-      <span className="text-[10px] font-black uppercase tracking-[0.1em]">{cfg.label}</span>
-    </div>
-  );
-}
-
-const MyOrdersPage = () => {
-  const { user, isAuthenticated, loading: authLoading } = useAuth();
+export default function MyOrdersPage() {
   const router = useRouter();
-  
-  const [email, setEmail] = useState('');
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
   const [orders, setOrders] = useState([]);
-  const [ordersTotal, setOrdersTotal] = useState(0);
+  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [loadingPage, setLoadingPage] = useState(false);
-  const [searched, setSearched] = useState(false);
-  const [error, setError] = useState(null);
-  const [lastEmail, setLastEmail] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  // Define fetch handler
-  const fetchOrders = useCallback(async (targetEmail = null) => {
+  const load = useCallback(async (pageNum) => {
     setLoading(true);
-    setError(null);
     try {
-      const data = await getOrders(targetEmail, { page: 1, page_size: ORDERS_PAGE_SIZE });
+      const data = await getMyOrders({ page: pageNum, page_size: PAGE_SIZE });
       setOrders(data.results);
-      setOrdersTotal(data.total);
-      setPage(1);
-      setLastEmail(targetEmail);
-      setSearched(true);
+      setTotal(data.total);
+      setPage(pageNum);
+      setError('');
     } catch (err) {
-      setError(err.message || 'Failed to load orders.');
-      setOrders([]);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  const goToPage = async (pageNum) => {
-    if (loadingPage) return;
-    setLoadingPage(true);
-    try {
-      const data = await getOrders(lastEmail, { page: pageNum, page_size: ORDERS_PAGE_SIZE });
-      setOrders(data.results);
-      setOrdersTotal(data.total);
-      setPage(pageNum);
-    } catch (err) {
-      console.error('Failed to load orders page:', err);
-    } finally {
-      setLoadingPage(false);
-    }
-  };
-
-  // Automatically fetch if logged in
   useEffect(() => {
-    if (!authLoading && isAuthenticated) {
-      fetchOrders();
-    }
-  }, [authLoading, isAuthenticated, fetchOrders]);
+    if (authLoading) return;
+    if (!isAuthenticated) router.replace('/login?redirect=/orders');
+    else load(1);
+  }, [authLoading, isAuthenticated, load, router]);
 
-  const handleManualSearch = (e) => {
-    e.preventDefault();
-    fetchOrders(email);
-  };
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900 selection:bg-orange-200">
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
       <Navbar />
+      <main className="flex-grow w-full max-w-4xl mx-auto px-4 py-8 md:py-16">
+        <h1 className="text-3xl md:text-5xl font-[family-name:var(--font-climate-crisis)] uppercase text-blue-950">
+          My <span className="text-blue-600">Orders.</span>
+        </h1>
+        {user && <p className="text-slate-500 mt-2 mb-8">Hi {user.full_name?.split(' ')[0] || 'there'}, here is everything you have ordered.</p>}
 
-      <main className="flex-grow w-full max-w-5xl mx-auto px-4 py-12 md:py-20">
-        <div className="flex flex-col gap-8 md:gap-12">
-          {/* Header */}
-          <div className="flex flex-col gap-4">
-            <h1 className="text-4xl md:text-5xl font-[family-name:var(--font-climate-crisis)] uppercase text-blue-950">
-              My <span className="text-blue-600">Orders.</span>
-            </h1>
-            <p className="text-slate-500 text-lg">
-              {isAuthenticated 
-                ? `Hello ${user.full_name?.split(' ')[0]}, here are your recent purchases.`
-                : "Enter your email address to find and track your orders."}
-            </p>
+        {error && <div className="bg-red-50 text-red-600 rounded-2xl p-4 text-sm font-bold mb-6">{error}</div>}
+
+        {loading ? (
+          <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 text-orange-500 animate-spin" /></div>
+        ) : orders.length === 0 ? (
+          <div className="bg-white rounded-3xl border border-slate-100 p-10 text-center flex flex-col items-center gap-4">
+            <ShoppingBag className="w-12 h-12 text-slate-200" />
+            <p className="text-slate-500">You have not placed any orders yet.</p>
+            <Link href="/shop" className="px-6 py-3 rounded-full bg-orange-500 text-white text-xs font-black uppercase tracking-widest">Start shopping</Link>
           </div>
-
-          {!isAuthenticated && (
-            /* Email Search Form (Only for guests or logged out) */
-            <form onSubmit={handleManualSearch} className="flex flex-col sm:flex-row gap-3 bg-white p-3 rounded-[32px] shadow-xl shadow-slate-200/50 border border-slate-100 transition-all focus-within:shadow-blue-100">
-              <div className="relative flex-grow">
-                <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-300" />
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Enter your order email address"
-                  className="w-full bg-transparent border-none pl-14 pr-5 py-4 text-sm focus:outline-none placeholder:text-slate-300"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={loading}
-                className="bg-blue-600 text-white px-10 py-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-3 whitespace-nowrap"
-              >
-                {loading ? 'Searching...' : (
-                  <>
-                    <Search className="w-4 h-4" />
-                    Track Orders
-                  </>
-                )}
-              </button>
-            </form>
-          )}
-
-          {/* Error */}
-          {error && (
-            <div className="bg-red-50 border border-red-100 rounded-2xl p-6 text-center flex items-center justify-center gap-3">
-              <AlertCircle className="w-5 h-5 text-red-500" />
-              <p className="text-red-500 text-sm font-bold">{error}</p>
-            </div>
-          )}
-
-          {/* Loading Skeleton */}
-          {loading && (
-            <div className="flex flex-col gap-8">
-              {[1, 2].map(i => (
-                <div key={i} className="h-64 bg-white rounded-[40px] animate-pulse border border-slate-100" />
-              ))}
-            </div>
-          )}
-
-          {/* Results */}
-          {!loading && searched && (
-            <>
-              {orders.length === 0 ? (
-                <div className="bg-white rounded-[40px] p-16 text-center flex flex-col items-center gap-8 border border-slate-100 shadow-xl shadow-slate-200/40 animate-in fade-in zoom-in duration-500">
-                  <div className="w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center text-slate-200">
-                    <ShoppingBag className="w-12 h-12" strokeWidth={1.5} />
-                  </div>
-                  <div className="flex flex-col gap-3">
-                    <h3 className="text-2xl font-[family-name:var(--font-climate-crisis)] uppercase text-blue-950">No orders found</h3>
-                    <p className="text-slate-500 max-w-xs mx-auto">
-                      We couldn&apos;t find any orders for <strong>{email}</strong>.
-                    </p>
-                  </div>
-                  <Link
-                    href="/shop"
-                    className="bg-orange-500 text-white px-10 py-4 rounded-full font-black uppercase tracking-widest text-xs shadow-xl shadow-orange-100 hover:bg-orange-600 transition-all active:scale-95"
-                  >
-                    Start Shopping
-                  </Link>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-8">
-                  {orders.map((order) => (
-                    <div
-                      key={order.id}
-                      className="bg-white rounded-[40px] border border-slate-100 shadow-xl shadow-slate-200/30 overflow-hidden hover:shadow-2xl hover:shadow-slate-200/50 transition-all duration-500 group animate-in slide-in-from-bottom-4"
-                    >
-                      <div className="p-8 md:p-10 flex flex-col gap-8">
-                        {/* Order Meta */}
-                        <div className="flex flex-wrap items-center justify-between gap-6">
-                          <div className="flex items-center gap-8">
-                             <div className="flex flex-col gap-1">
-                               <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Order Placed</span>
-                               <span className="text-sm font-bold text-slate-600">{order.date}</span>
-                             </div>
-                             <div className="w-px h-8 bg-slate-100 hidden sm:block" />
-                             <div className="flex flex-col gap-1">
-                               <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total Amount</span>
-                               <span className="text-sm font-black text-blue-950">₹{(order.total_amount ?? 0).toLocaleString('en-IN')}</span>
-                             </div>
-                          </div>
-                          <StatusBadge status={order.status} />
-                        </div>
-
-                        <div className="h-px bg-slate-50 w-full" />
-
-                        {/* Items */}
-                        <div className="flex flex-col gap-6">
-                          {(order.items || []).map((item, idx) => (
-                            <div key={idx} className="flex items-center gap-6 group/item">
-                              <div className="w-20 h-20 rounded-2xl bg-slate-50 border border-slate-100 overflow-hidden flex-shrink-0 transition-transform group-hover/item:scale-105">
-                                {item.image ? (
-                                  <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center">
-                                    <Package className="w-8 h-8 text-slate-200" />
-                                  </div>
-                                )}
-                              </div>
-                              <div className="flex-grow flex flex-col gap-1">
-                                <h4 className="text-base font-bold text-blue-950 group-hover/item:text-orange-500 transition-colors uppercase">{item.name}</h4>
-                                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                                   {item.quantity} × ₹{Number(item.price ?? 0).toLocaleString('en-IN')}
-                                </p>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-
-                        <div className="h-px bg-slate-50 w-full" />
-
-                        {/* Order Detail Link */}
-                        <div className="flex justify-between items-center">
-                           <div className="text-[10px] font-black text-slate-300 uppercase tracking-[0.2em]">Order #{order.id?.slice(-8)}</div>
-                           <Link
-                             href={`/orders/${order.id}`}
-                             className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-blue-600 hover:text-orange-500 transition-all group-hover:translate-x-1"
-                           >
-                             View Full Details
-                             <ChevronRight className="w-4 h-4" />
-                           </Link>
-                        </div>
-                      </div>
+        ) : (
+          <ul className="flex flex-col gap-4">
+            {orders.map((o) => (
+              <li key={o.id}>
+                <Link href={`/orders/${o.id}`} className="block bg-white rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all p-4 md:p-6">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                    <div>
+                      <p className="font-black text-blue-950">{o.order_number}</p>
+                      <p className="text-xs text-slate-500">{o.date}</p>
                     </div>
-                  ))}
-                </div>
-              )}
-              {ordersTotal > ORDERS_PAGE_SIZE && (
-                <div className="flex justify-center items-center gap-2 pt-4 flex-wrap">
-                  <button
-                    onClick={() => goToPage(page - 1)}
-                    disabled={page <= 1 || loadingPage}
-                    className="px-5 py-3 bg-white border-2 border-slate-200 text-blue-950 rounded-full text-xs font-black uppercase tracking-widest hover:bg-slate-50 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
-                  >
-                    <ChevronLeft className="w-4 h-4" /> Prev
-                  </button>
+                    <div className="flex flex-wrap gap-2">
+                      <StatusBadge status={o.status} />
+                      <PaymentBadge status={o.payment_status} method={o.payment_method} />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="flex -space-x-3">
+                      {o.items.slice(0, 4).map((item) => (
+                        <div key={item.id} className="w-12 h-12 md:w-14 md:h-14 rounded-2xl border-2 border-white bg-slate-100 overflow-hidden">
+                          {item.image ? <img src={item.image} alt="" className="w-full h-full object-cover" /> : <Package className="w-5 h-5 m-3.5 text-slate-300" />}
+                        </div>
+                      ))}
+                    </div>
+                    <p className="flex-1 text-sm text-slate-600 line-clamp-2 min-w-0">
+                      {o.items.map((i) => i.name).join(', ')}
+                    </p>
+                    <div className="text-right shrink-0">
+                      <p className="font-black text-blue-950">₹{o.total_amount.toLocaleString('en-IN')}</p>
+                      <ChevronRight className="w-4 h-4 text-slate-300 ml-auto" />
+                    </div>
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
 
-                  {getPaginationRange(page, Math.ceil(ordersTotal / ORDERS_PAGE_SIZE)).map((p) =>
-                    typeof p === 'number' ? (
-                      <button
-                        key={p}
-                        onClick={() => goToPage(p)}
-                        disabled={loadingPage}
-                        className={`w-10 h-10 rounded-full text-xs font-black transition-all disabled:cursor-not-allowed ${
-                          p === page
-                            ? 'bg-blue-600 text-white shadow-lg'
-                            : 'bg-white border-2 border-slate-200 text-blue-950 hover:bg-slate-50'
-                        }`}
-                      >
-                        {p}
-                      </button>
-                    ) : (
-                      <span key={p} className="px-1 text-slate-300 text-xs font-black">…</span>
-                    )
-                  )}
-
-                  <button
-                    onClick={() => goToPage(page + 1)}
-                    disabled={page >= Math.ceil(ordersTotal / ORDERS_PAGE_SIZE) || loadingPage}
-                    className="px-5 py-3 bg-white border-2 border-slate-200 text-blue-950 rounded-full text-xs font-black uppercase tracking-widest hover:bg-slate-50 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
-                  >
-                    Next <ChevronRight className="w-4 h-4" />
-                  </button>
-
-                  {loadingPage && <Loader2 className="w-4 h-4 animate-spin text-blue-600 ml-2" />}
-                </div>
-              )}
-            </>
-          )}
-
-          {/* Not searched yet — hint for logged out */}
-          {!isAuthenticated && !searched && !loading && (
-            <div className="bg-white rounded-[40px] p-16 text-center flex flex-col items-center gap-6 border border-slate-100 shadow-xl shadow-slate-200/30">
-              <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center text-blue-300">
-                <Package className="w-10 h-10" strokeWidth={1.5} />
-              </div>
-              <p className="text-slate-500 font-medium max-w-xs mx-auto">
-                Already have an account? <Link href="/login" className="text-blue-600 font-bold hover:underline">Log in</Link> to see your orders automatically.
-              </p>
-            </div>
-          )}
-        </div>
+        {pages > 1 && (
+          <div className="flex items-center justify-center gap-3 mt-8">
+            <button disabled={page <= 1 || loading} onClick={() => load(page - 1)} className="px-5 py-2.5 rounded-full bg-white border border-slate-200 text-sm font-bold disabled:opacity-40">Previous</button>
+            <span className="text-sm text-slate-500">Page {page} of {pages}</span>
+            <button disabled={page >= pages || loading} onClick={() => load(page + 1)} className="px-5 py-2.5 rounded-full bg-white border border-slate-200 text-sm font-bold disabled:opacity-40">Next</button>
+          </div>
+        )}
       </main>
-
       <Footer />
     </div>
   );
-};
-
-export default MyOrdersPage;
+}

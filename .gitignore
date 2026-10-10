@@ -50,3 +50,5 @@ next-env.d.ts
 
 # nginx configuration
 backend/docker/nginx/conf.d/default.conf
+
+!.env.example

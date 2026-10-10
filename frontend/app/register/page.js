@@ -7,12 +7,13 @@ import Link from 'next/link';
 import { useAuth } from '../../context/AuthContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { UserPlus, Mail, Lock, User, CheckCircle2, AlertCircle } from 'lucide-react';
+import { safeRedirect } from '../../lib/constants';
 
 function RegisterPageContent() {
   const { register } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectPath = searchParams.get('redirect') || '/';
+  const redirectPath = safeRedirect(searchParams.get('redirect'));
 
   const [formData, setFormData] = useState({
     full_name: '',
@@ -29,6 +30,10 @@ function RegisterPageContent() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (formData.password.length < 8) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
     if (formData.password !== formData.confirm_password) {
       setError('Passwords do not match');
       return;
@@ -37,12 +42,16 @@ function RegisterPageContent() {
     setLoading(true);
     setError('');
     try {
-      await register({
+      const result = await register({
         full_name: formData.full_name,
         email: formData.email,
         password: formData.password
       });
-      router.push(redirectPath);
+      if (!result.success) {
+        setError(result.error || 'Registration failed');
+        return;
+      }
+      router.replace(redirectPath);
     } catch (err) {
       setError(err.message || 'Registration failed');
     } finally {

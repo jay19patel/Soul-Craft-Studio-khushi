@@ -1,262 +1,197 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { createCart, updateCart, fetchActiveCart } from '../lib/api';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import { updateCart, fetchActiveCart } from '../lib/api';
 import { useAuth } from './AuthContext';
 
 const CartContext = createContext();
+const GUEST_KEY = 'scs_guest_cart_v1';
+const SYNC_DELAY_MS = 400;
 
-/**
- * Normalise a product before adding to cart.
- * Handles both old static-JSON shape and new API shape.
- */
-function normaliseCartProduct(product) {
-  const catalogProductId = String(product.id ?? product._id ?? '');
-  const rawPrice =
-    product.price_value ??
-    product.priceValue ??
-    parseFloat(String(product.price ?? "0").replace(/[^\d.]/g, "")) ??
-    0;
-  // Apply discount client-side so the cart total is correct immediately —
-  // otherwise it only reflects the discount after the next server cart sync.
+function readGuestCart() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(GUEST_KEY) || '[]');
+    return Array.isArray(raw) ? raw.filter((i) => i && i.id && i.quantity > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeGuestCart(items) {
+  try {
+    if (items.length) localStorage.setItem(GUEST_KEY, JSON.stringify(items));
+    else localStorage.removeItem(GUEST_KEY);
+  } catch {}
+}
+
+/** Snapshot of a product for showing in the cart before the server confirms prices. */
+function toCartLine(product, quantity) {
+  const priceValue = Number(product.price_value ?? product.priceValue ?? 0);
   const discount = Number(product.discount || 0);
-  const effectivePrice = discount > 0 ? Math.round(rawPrice * (1 - discount / 100)) : rawPrice;
   return {
-    ...product,
-    id: catalogProductId,
-    // Image: prefer explicit image field, fall back to img (API), then null
-    image: product.image || product.img || null,
-    // Numeric price for arithmetic, discount already applied
-    priceValue: effectivePrice,
+    id: String(product.id),
+    name: product.name,
+    image: product.image || product.primary_image || null,
+    price: product.sale_price ?? product.salePrice ?? Math.round(priceValue * (1 - discount / 100)),
+    mrp: priceValue,
+    stock: Number(product.stock ?? 99),
+    quantity,
   };
 }
 
-/** Build a stable catalog product id for PATCH payloads (never use cart-line row id here). */
-function resolveProductIdForCartLine(line) {
-  if (!line) return '';
-  if (line.product_id) return String(line.product_id);
-  const productRef = line.product;
-  if (typeof productRef === 'string') return productRef;
-  if (productRef && typeof productRef === 'object') {
-    const nestedId =
-      productRef.id ??
-      productRef._id ??
-      productRef.$id ??
-      (productRef.$oid != null ? productRef.$oid : '');
-    if (nestedId !== '' && nestedId !== undefined && nestedId !== null) {
-      return String(nestedId);
-    }
-  }
-  return '';
-}
-
 /**
- * API cart lines → in-memory cart rows keyed by catalog product id (for addToCart / sync).
+ * Cart works for guests too (stored in this browser) and is merged into the
+ * account cart on login. For logged-in users the server is the source of
+ * truth: it re-prices every line and clamps quantities to live stock.
  */
-function normalizeCartLinesFromApi(items) {
-  if (!Array.isArray(items)) return [];
-  return items.map((line) => {
-    const productId = resolveProductIdForCartLine(line);
-    const embedded = line.product && typeof line.product === 'object' ? line.product : null;
-    return {
-      id: productId,
-      name: line.name || embedded?.name || 'Item',
-      priceValue: Number(line.price ?? embedded?.price_value ?? 0),
-      price: line.price,
-      image:
-        line.image ||
-        embedded?.primary_image?.file_path ||
-        embedded?.image_url ||
-        embedded?.image ||
-        null,
-      quantity: Number(line.quantity ?? 1),
-    };
-  });
-}
-
 export const CartProvider = ({ children }) => {
+  const { isAuthenticated, loading: authLoading } = useAuth();
   const [cart, setCart] = useState([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
-  const [cartId, setCartId] = useState(null);
   const [isReady, setIsReady] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [notice, setNotice] = useState('');
 
-  // ? Skip the first sync cycle after the cart is loaded from the server so we
-  //   don't immediately PATCH with the same data (which causes the backend to
-  //   delete and re-create all CartItem documents for no reason).
-  const skipNextSyncRef = React.useRef(false);
+  const syncTimer = useRef(null);
+  const pendingSync = useRef(null);
 
-  const { isAuthenticated, user, loading: authLoading } = useAuth();
-  const router = useRouter();
+  const applyServerCart = useCallback((serverCart, requested) => {
+    const items = serverCart?.items || [];
+    setCart(items);
+    if (requested) {
+      const changed = requested.some((r) => {
+        const s = items.find((i) => i.id === r.id);
+        return !s || s.quantity !== r.quantity;
+      });
+      if (changed) setNotice('Some items were updated to match available stock.');
+    }
+  }, []);
 
-  // 1. Backend cart only after login (JWT). Guests have no server cart.
+  // Load cart (and merge guest cart) whenever auth state settles.
   useEffect(() => {
-    const initCart = async () => {
-      if (authLoading) {
-        return;
-      }
+    if (authLoading) return;
+    let cancelled = false;
 
-      if (!isAuthenticated || !user) {
-        setCart([]);
-        setCartId(null);
+    (async () => {
+      if (!isAuthenticated) {
+        setCart(readGuestCart());
         setIsReady(true);
         return;
       }
-
-      const userId = user.id || user._id;
-      if (!userId) {
-        setCart([]);
-        setCartId(null);
-        setIsReady(true);
-        return;
-      }
-
       try {
-        let activeCart = await fetchActiveCart();
-
-        if (activeCart) {
-          skipNextSyncRef.current = true;
-          setCartId(String(activeCart.id || activeCart._id || ''));
-          setCart(normalizeCartLinesFromApi(activeCart.items));
-        } else {
-          const newCart = await createCart({ items: [], total_amount: 0 });
-          setCartId(String(newCart.id || newCart._id || ''));
-          setCart([]);
+        const serverCart = await fetchActiveCart();
+        const guest = readGuestCart();
+        if (guest.length) {
+          const merged = new Map((serverCart?.items || []).map((i) => [i.id, i.quantity]));
+          for (const g of guest) merged.set(g.id, (merged.get(g.id) || 0) + g.quantity);
+          const payload = [...merged].map(([product, quantity]) => ({ product, quantity }));
+          const updated = await updateCart(null, { items: payload });
+          writeGuestCart([]);
+          if (!cancelled) applyServerCart(updated);
+        } else if (!cancelled) {
+          applyServerCart(serverCart);
         }
       } catch (err) {
-        console.error("Cart initialization failed:", err);
-        setCart([]);
-        setCartId(null);
+        console.error('Cart load failed:', err);
+        if (!cancelled) setCart([]);
       } finally {
-        setIsReady(true);
+        if (!cancelled) setIsReady(true);
       }
+    })();
+
+    return () => {
+      cancelled = true;
     };
+  }, [isAuthenticated, authLoading, applyServerCart]);
 
-    initCart();
-  }, [isAuthenticated, user, authLoading]);
-
-  // 2. Sync cart to backend when logged in and a cart id exists.
-  //    skipNextSyncRef prevents firing immediately after the server load (which
-  //    would delete + recreate every CartItem document with identical data).
-  useEffect(() => {
-    if (!isAuthenticated || !isReady || !cartId) return;
-
-    if (skipNextSyncRef.current) {
-      skipNextSyncRef.current = false;
-      return;
-    }
-
-    const totalAmount = cart.reduce(
-      (sum, item) => sum + (item.priceValue ?? item.price ?? 0) * item.quantity,
-      0
-    );
-
-    const payloadItems = cart
-      .map((item) => {
-        const productIdFromReference = resolveProductIdForCartLine({
-          product_id: item.product_id,
-          product: item.product,
-        });
-        const catalogProductId =
-          (productIdFromReference && String(productIdFromReference).trim()) ||
-          String(item.id ?? '').trim();
-        if (!catalogProductId) {
-          return null;
-        }
-        return {
-          product: catalogProductId,
-          name: item.name,
-          quantity: item.quantity,
-          price:
-            item.priceValue ??
-            (typeof item.price === 'string'
-              ? parseFloat(String(item.price).replace(/[^\d.]/g, ''))
-              : item.price),
-        };
-      })
-      .filter(Boolean);
-
-    if (cartId) {
-      updateCart(cartId, { items: payloadItems, total_amount: totalAmount }).catch((err) => {
-        console.error("Cart sync failed:", err);
-      });
-    }
-  }, [cart, isReady, cartId, isAuthenticated]);
-
-  const addToCart = (product) => {
-    if (!isAuthenticated) {
-      // Redirect to login with current path as redirect param
-      const path = typeof window !== 'undefined' ? window.location.pathname : '/shop';
-      router.push(`/login?redirect=${path}`);
-      return;
-    }
-
-    const norm = normaliseCartProduct(product);
-    if (!norm.id) {
-      console.error("Cannot add to cart: product is missing a stable catalog id.");
-      return;
-    }
-    setCart((prev) => {
-      const existing = prev.find((item) => item.id === norm.id);
-      if (existing) {
-        return prev.map((item) =>
-          item.id === norm.id ? { ...item, quantity: item.quantity + 1 } : item
-        );
+  const scheduleSync = useCallback(
+    (nextCart) => {
+      if (!isAuthenticated) {
+        writeGuestCart(nextCart);
+        return;
       }
-      return [...prev, { ...norm, quantity: 1 }];
-    });
-    setIsCartOpen(true);
-  };
-
-  const removeFromCart = (productId) => {
-    setCart((prev) => prev.filter((item) => item.id !== productId));
-  };
-
-  const updateQuantity = (productId, amount) => {
-    setCart((prev) =>
-      prev.map((item) => {
-        if (item.id === productId) {
-          const newQty = Math.max(1, item.quantity + amount);
-          return { ...item, quantity: newQty };
+      pendingSync.current = nextCart;
+      clearTimeout(syncTimer.current);
+      syncTimer.current = setTimeout(async () => {
+        const requested = pendingSync.current;
+        pendingSync.current = null;
+        setSyncing(true);
+        try {
+          const updated = await updateCart(null, {
+            items: requested.map((i) => ({ product: i.id, quantity: i.quantity })),
+          });
+          if (!pendingSync.current) applyServerCart(updated, requested);
+        } catch (err) {
+          console.error('Cart sync failed:', err);
+        } finally {
+          setSyncing(false);
         }
-        return item;
+      }, SYNC_DELAY_MS);
+    },
+    [isAuthenticated, applyServerCart]
+  );
+
+  const mutate = (fn) => {
+    setCart((prev) => {
+      const next = fn(prev);
+      scheduleSync(next);
+      return next;
+    });
+  };
+
+  const addToCart = (product, quantity = 1, { open = true } = {}) => {
+    if (!product?.id) return;
+    const id = String(product.id);
+    const stock = Number(product.stock ?? 99);
+    if (stock < 1) return;
+    mutate((prev) => {
+      const existing = prev.find((i) => i.id === id);
+      if (existing) {
+        return prev.map((i) => (i.id === id ? { ...i, quantity: Math.min(stock, i.quantity + quantity, 20) } : i));
+      }
+      return [...prev, toCartLine(product, Math.min(stock, quantity, 20))];
+    });
+    if (open) setIsCartOpen(true);
+  };
+
+  const removeFromCart = (productId) => mutate((prev) => prev.filter((i) => i.id !== productId));
+
+  const updateQuantity = (productId, delta) =>
+    mutate((prev) =>
+      prev.map((i) => {
+        if (i.id !== productId) return i;
+        const max = Math.min(20, Number(i.stock ?? 20) || 20);
+        return { ...i, quantity: Math.max(1, Math.min(max, i.quantity + delta)) };
       })
     );
-  };
 
+  /** Local-only clear — the server empties the cart itself when an order is placed. */
   const clearCart = () => {
     setCart([]);
+    writeGuestCart([]);
   };
 
   const toggleCart = () => setIsCartOpen((o) => !o);
-
-  /** Total item count across all cart lines */
-  const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
-
-  /**
-   * Monetary total — uses priceValue (numeric) so it works with both
-   * static JSON products (numeric price) and API products (price_value).
-   */
-  const cartTotal = cart.reduce(
-    (sum, item) => sum + (item.priceValue ?? item.price ?? 0) * item.quantity,
-    0
-  );
+  const cartCount = cart.reduce((sum, i) => sum + i.quantity, 0);
+  const cartTotal = cart.reduce((sum, i) => sum + Number(i.price || 0) * i.quantity, 0);
 
   return (
     <CartContext.Provider
       value={{
         cart,
-        cartId,
         addToCart,
         removeFromCart,
         updateQuantity,
         clearCart,
         isCartOpen,
+        setIsCartOpen,
         toggleCart,
         cartCount,
         cartTotal,
-        setIsCartOpen,
         isReady,
+        syncing,
+        notice,
+        clearNotice: () => setNotice(''),
       }}
     >
       {children}
@@ -266,9 +201,6 @@ export const CartProvider = ({ children }) => {
 
 export const useCart = () => {
   const context = useContext(CartContext);
-  if (!context) {
-    throw new Error('useCart must be used within a CartProvider');
-  }
+  if (!context) throw new Error('useCart must be used within a CartProvider');
   return context;
 };
-
